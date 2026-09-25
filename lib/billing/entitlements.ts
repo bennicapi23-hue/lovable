@@ -1,30 +1,25 @@
-import type { NextRequest } from 'next/server';
+import { and, eq, sql } from 'drizzle-orm';
 import { DEFAULT_PLAN_ID, getPlan, type Plan, type PlanId } from '@/config/plans.config';
+import { getDb, usage, users } from '@/lib/db';
 
 /**
  * Entitlements and metering.
  *
  * This is the enforcement point for what config/plans.config.ts promises.
- * It is deliberately split from whatever identity system an operator plugs
- * in: `resolveAccount` is the single seam. Wire it to your auth and billing
- * provider and every gated route starts enforcing real plans without any
- * other change.
+ * Usage counters live in the database, so a limit survives a deploy and
+ * applies across instances — which is what makes a plan limit a limit rather
+ * than a suggestion.
  *
- * Out of the box it resolves every caller to a single local account on the
- * plan named by KILN_DEFAULT_PLAN. That makes a self-hosted install work
- * immediately, while the metering below still runs, so quota behaviour can
- * be seen and tested before billing is connected.
- *
- * Usage counters live in memory and reset when the process does. For a
- * multi-instance deployment, replace the counter store with a shared one —
- * `usageStore` is the seam for that.
+ * Deliberately depends on nothing but the database. Resolving *who* is asking
+ * needs the Auth.js runtime, which drags in the whole Next server; keeping
+ * that in lib/billing/session.ts means the metering rules stay testable on
+ * their own and the framework stays at the edge.
  */
 
 export interface Account {
   id: string;
   planId: PlanId;
-  /** Present once a billing provider is connected. */
-  customerId?: string;
+  email?: string | null;
 }
 
 export type MeteredAction = 'build' | 'edit';
@@ -32,57 +27,27 @@ export type MeteredAction = 'build' | 'edit';
 export interface EntitlementCheck {
   allowed: boolean;
   plan: Plan;
-  /** Why it was refused, safe to show the user. */
   reason?: string;
-  /** Remaining allowance for the metered action that was checked. */
   remaining?: number;
-  /** When the current window resets, as an ISO string. */
   resetsAt?: string;
+  /** Distinguishes "sign in" from "you are out of builds" at the call site. */
+  unauthenticated?: boolean;
 }
 
-/* ------------------------------------------------------------------ store */
+/* ----------------------------------------------------------------- period */
 
-interface UsageWindow {
-  build: number;
-  edit: number;
-  /** Epoch ms at which this window ends. */
-  resetsAt: number;
+/** Current metering window, 'YYYY-MM' in UTC. */
+export function currentPeriod(at: Date = new Date()): string {
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-const usageStore = new Map<string, UsageWindow>();
-
-/** Start of the next calendar month, in UTC. */
-function nextMonthBoundary(now: number): number {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+/** Start of the next window, which is when allowances come back. */
+export function periodResetsAt(at: Date = new Date()): Date {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1));
 }
 
-function currentWindow(accountId: string, now = Date.now()): UsageWindow {
-  const existing = usageStore.get(accountId);
-  if (existing && existing.resetsAt > now) return existing;
+/* ------------------------------------------------------------ enrolment */
 
-  const fresh: UsageWindow = { build: 0, edit: 0, resetsAt: nextMonthBoundary(now) };
-  usageStore.set(accountId, fresh);
-  return fresh;
-}
-
-/* -------------------------------------------------------------- identity */
-
-/**
- * Resolves the calling account.
- *
- * Replace this with a lookup against your session/JWT and billing records.
- * The rest of this module does not care how identity is established.
- */
-export async function resolveAccount(_request: NextRequest): Promise<Account> {
-  const configured = process.env.KILN_DEFAULT_PLAN as PlanId | undefined;
-  const planId = getPlan(configured).id;
-  return { id: 'local', planId };
-}
-
-/* ------------------------------------------------------------ enforcement */
-
-/** True when the account's plan includes a named capability. */
 export function hasEntitlement(account: Account, entitlement: string): boolean {
   return getPlan(account.planId).entitlements.includes(entitlement);
 }
@@ -91,28 +56,40 @@ function limitFor(plan: Plan, action: MeteredAction): number {
   return action === 'build' ? plan.limits.buildsPerMonth : plan.limits.editsPerMonth;
 }
 
+/** Usage for this account in the current window, creating the row if absent. */
+async function readUsage(accountId: string): Promise<{ build: number; edit: number }> {
+  const period = currentPeriod();
+  const [row] = await getDb()
+    .select({ builds: usage.builds, edits: usage.edits })
+    .from(usage)
+    .where(and(eq(usage.userId, accountId), eq(usage.period, period)))
+    .limit(1);
+
+  return { build: row?.builds ?? 0, edit: row?.edits ?? 0 };
+}
+
 /**
- * Checks an action without consuming allowance. Use before doing expensive
- * setup work, then call `recordUsage` once the action actually happens.
+ * Checks an action without consuming allowance. Call before doing expensive
+ * setup, then `recordUsage` once the action actually starts.
  */
-export function checkAllowance(account: Account, action: MeteredAction): EntitlementCheck {
+export async function checkAllowance(
+  account: Account,
+  action: MeteredAction,
+): Promise<EntitlementCheck> {
   const plan = getPlan(account.planId);
 
   if (!plan.entitlements.includes(action)) {
-    return {
-      allowed: false,
-      plan,
-      reason: `The ${plan.name} plan does not include ${action}s.`,
-    };
+    return { allowed: false, plan, reason: `The ${plan.name} plan does not include ${action}s.` };
   }
 
   const limit = limitFor(plan, action);
+  const resetsAt = periodResetsAt().toISOString();
+
   if (!Number.isFinite(limit)) {
-    return { allowed: true, plan, remaining: Number.POSITIVE_INFINITY };
+    return { allowed: true, plan, remaining: Number.POSITIVE_INFINITY, resetsAt };
   }
 
-  const window = currentWindow(account.id);
-  const used = window[action];
+  const used = (await readUsage(account.id))[action];
   const remaining = Math.max(0, limit - used);
 
   if (used >= limit) {
@@ -120,59 +97,64 @@ export function checkAllowance(account: Account, action: MeteredAction): Entitle
       allowed: false,
       plan,
       remaining: 0,
-      resetsAt: new Date(window.resetsAt).toISOString(),
+      resetsAt,
       reason:
         `You have used all ${limit.toLocaleString('en-GB')} ${action}s on the ` +
         `${plan.name} plan this month. Upgrade for more, or wait for the reset.`,
     };
   }
 
-  return {
-    allowed: true,
-    plan,
-    remaining,
-    resetsAt: new Date(window.resetsAt).toISOString(),
-  };
-}
-
-/** Consumes one unit of allowance. Call only when the action really ran. */
-export function recordUsage(account: Account, action: MeteredAction, units = 1): void {
-  const window = currentWindow(account.id);
-  window[action] += units;
+  return { allowed: true, plan, remaining, resetsAt };
 }
 
 /**
- * Convenience wrapper for route handlers: resolve, check, and return the
- * pieces a route needs to either proceed or refuse.
+ * Consumes allowance.
+ *
+ * Written as an upsert so two builds starting at once cannot both read zero
+ * and both write one. The increment happens in the database, not in
+ * JavaScript, so the count is right under concurrency.
  */
-export async function authorizeAction(
-  request: NextRequest,
+export async function recordUsage(
+  account: Account,
   action: MeteredAction,
-): Promise<{ account: Account; check: EntitlementCheck }> {
-  const account = await resolveAccount(request);
-  return { account, check: checkAllowance(account, action) };
+  units = 1,
+): Promise<void> {
+  const period = currentPeriod();
+  const column = action === 'build' ? 'builds' : 'edits';
+
+  await getDb()
+    .insert(usage)
+    .values({
+      userId: account.id,
+      period,
+      builds: action === 'build' ? units : 0,
+      edits: action === 'edit' ? units : 0,
+    })
+    .onConflictDoUpdate({
+      target: [usage.userId, usage.period],
+      set: {
+        [column]: sql`${sql.identifier(column)} + ${units}`,
+        updatedAt: sql`(unixepoch() * 1000)`,
+      },
+    });
 }
 
-/** Current usage, for a dashboard or an account page. */
-export function usageSnapshot(account: Account): {
-  plan: Plan;
-  builds: { used: number; limit: number };
-  edits: { used: number; limit: number };
-  resetsAt: string;
-} {
+/** Current usage, for the account page. */
+export async function usageSnapshot(account: Account) {
   const plan = getPlan(account.planId);
-  const window = currentWindow(account.id);
+  const used = await readUsage(account.id);
   return {
     plan,
-    builds: { used: window.build, limit: plan.limits.buildsPerMonth },
-    edits: { used: window.edit, limit: plan.limits.editsPerMonth },
-    resetsAt: new Date(window.resetsAt).toISOString(),
+    builds: { used: used.build, limit: plan.limits.buildsPerMonth },
+    edits: { used: used.edit, limit: plan.limits.editsPerMonth },
+    period: currentPeriod(),
+    resetsAt: periodResetsAt().toISOString(),
   };
 }
 
-/** Test seam. */
-export function __resetUsage(): void {
-  usageStore.clear();
+/** Moves an account onto a plan. The seam a billing webhook calls. */
+export async function setPlan(accountId: string, planId: PlanId): Promise<void> {
+  await getDb().update(users).set({ planId: getPlan(planId).id }).where(eq(users.id, accountId));
 }
 
 export { DEFAULT_PLAN_ID };

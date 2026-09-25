@@ -39,10 +39,14 @@ React — useful for lifting a legacy site into a modern stack.
 ```bash
 git clone <your-fork> kiln && cd kiln
 pnpm install
-cp .env.example .env.local   # then fill it in, see below
-pnpm check:env               # tells you exactly what is still missing
+cp .env.example .env.local        # then fill it in, see below
+openssl rand -base64 32           # put this in AUTH_SECRET
+pnpm db:migrate                   # creates ./kiln.db
+pnpm check:env                    # tells you exactly what is still missing
 pnpm dev
 ```
+
+Sign up at <http://localhost:3000/sign-in> — the first account is yours.
 
 Open <http://localhost:3000>.
 
@@ -54,8 +58,15 @@ Kiln needs two things to build an app, and one optional extra.
 |---|---|---|
 | **Language model** | `AI_GATEWAY_API_KEY`, or any of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `GROQ_API_KEY` | Yes — at least one |
 | **Sandbox** | `VERCEL_OIDC_TOKEN` (or `VERCEL_TOKEN` + `VERCEL_TEAM_ID` + `VERCEL_PROJECT_ID`), or `E2B_API_KEY` with `SANDBOX_PROVIDER=e2b` | Yes |
+| **Sessions** | `AUTH_SECRET` — `openssl rand -base64 32` | Yes |
+| **Database** | `DATABASE_URL` — defaults to `file:./kiln.db` | Defaulted |
 | **URL rebuild** | `FIRECRAWL_API_KEY` | No — building from a description works without it |
 | **Faster edits** | `MORPH_API_KEY` | No |
+| **OAuth sign-in** | `AUTH_GITHUB_ID`/`SECRET`, `AUTH_GOOGLE_ID`/`SECRET` | No — email and password works alone |
+
+You do not have to hold a key for the model named in `config/app.config.ts`.
+If its provider is not configured, Kiln falls back to a model whose provider
+is, and logs the substitution, rather than failing on a choice you never made.
 
 `pnpm check:env` reports what is configured, what is missing, and the exact fix
 for each gap. `GET /api/status` returns the same information as JSON, without
@@ -92,6 +103,8 @@ your header.
 ```
 app/
   page.tsx                  Marketing landing
+  sign-in/                  Sign in and registration
+  projects/                 Saved projects for the signed-in account
   create/                   Describe → plan → approve → build
   generation/               The studio: preview, files, chat
   pricing/  legal/          Commercial surface
@@ -103,9 +116,12 @@ app/
     status/                 Deployment readiness
 lib/
   app-builder/              Archetypes, blueprint schema, build prompts
-  ai/provider-manager.ts    Model → provider resolution
+  ai/provider-manager.ts    Model → provider resolution and fallback
   sandbox/                  Provider abstraction (Vercel, E2B)
-  billing/entitlements.ts   Plan limits and usage metering
+  auth/                     Auth.js config and scrypt password hashing
+  db/                       Drizzle schema, migrations, project queries
+  billing/entitlements.ts   Plan limits and metering (database only)
+  billing/session.ts        Request → account (the only Auth.js dependency)
   security/                 SSRF guard, rate limiting
   env.ts                    Configuration validation
 config/
@@ -126,9 +142,10 @@ the token block in `styles/design-system/kiln-tokens.css` for colour. The
 `heat-*` ramp in `colors.css` is the legacy primary and is aliased to the brand
 colour, so changing it re-skins components that predate the token layer.
 
-**Connect real billing** — `lib/billing/entitlements.ts` has one seam,
-`resolveAccount`. Point it at your session and billing records and every gated
-route starts enforcing real plans. Nothing else changes.
+**Connect real billing** — plans are already enforced against the signed-in
+account, with counters in the database. What is missing is payment: call
+`setPlan(userId, planId)` from your payment provider's webhook and the rest
+already works.
 
 ## Testing
 
@@ -156,14 +173,17 @@ Before promoting a deployment, run `pnpm check:env` against its environment, or
 poll `GET /api/status` — it returns `503` until the deployment can actually
 build an app.
 
-### Known limitation: single-tenant server state
+### Known limitation: one concurrent build per instance
 
-Sandbox and conversation state currently live in Node globals
-(`global.activeSandbox`, `global.conversationState`), inherited from upstream.
-One process therefore serves **one concurrent build**. A keyed
-`SandboxManager` already exists in `lib/sandbox/sandbox-manager.ts`; migrating
-the API routes onto it is the prerequisite for multi-tenant hosting. Until
-then, run one session per instance.
+Accounts, projects and usage are per-user and persisted. **Sandbox state is
+not**: it still lives in Node globals (`global.activeSandbox`,
+`global.conversationState`), inherited from upstream, so one process serves
+one concurrent build even though many users can now sign in.
+
+A keyed `SandboxManager` already exists in `lib/sandbox/sandbox-manager.ts`;
+migrating the API routes onto it, keyed by project, is the remaining work for
+multi-tenant hosting. Until then, run one builder instance per concurrent
+user, or put a queue in front.
 
 Rate limiting has the same shape — `lib/security/rate-limit.ts` counts
 per-instance and says so in its `X-RateLimit-Scope` header. Behind more than

@@ -6,8 +6,16 @@ const KEYS = [
   'AI_GATEWAY_API_KEY', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY',
   'GROQ_API_KEY', 'SANDBOX_PROVIDER', 'E2B_API_KEY', 'VERCEL_OIDC_TOKEN',
   'VERCEL_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID', 'FIRECRAWL_API_KEY',
-  'MORPH_API_KEY',
+  'MORPH_API_KEY', 'AUTH_SECRET', 'DATABASE_URL', 'DATABASE_AUTH_TOKEN',
 ];
+
+/** The four capabilities a deployment needs before it can build anything. */
+function configureMinimum() {
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+  process.env.VERCEL_OIDC_TOKEN = 'real-token';
+  process.env.AUTH_SECRET = 'a-real-secret-value';
+  // DATABASE_URL unset falls back to a local file, which is configured.
+}
 
 let saved;
 
@@ -47,16 +55,16 @@ describe('environment inspection', () => {
     assert.equal(report.features.sandbox, false);
   });
 
-  test('one model key plus one sandbox credential is enough to be ready', () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
-    process.env.VERCEL_OIDC_TOKEN = 'real-token';
+  test('a model key, a sandbox credential, auth and a database is enough', () => {
+    configureMinimum();
     const report = inspectEnv();
     assert.equal(report.ready, true);
     assert.deepEqual(report.aiProviders, ['anthropic']);
   });
 
   test('a partially filled Vercel PAT trio is still a failure', () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    configureMinimum();
+    delete process.env.VERCEL_OIDC_TOKEN;
     process.env.VERCEL_TOKEN = 'tok';
     process.env.VERCEL_TEAM_ID = 'team';
     // VERCEL_PROJECT_ID deliberately missing
@@ -66,17 +74,43 @@ describe('environment inspection', () => {
   });
 
   test('the full PAT trio works', () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
+    configureMinimum();
+    delete process.env.VERCEL_OIDC_TOKEN;
     process.env.VERCEL_TOKEN = 'tok';
     process.env.VERCEL_TEAM_ID = 'team';
     process.env.VERCEL_PROJECT_ID = 'prj';
     assert.equal(inspectEnv().ready, true);
   });
 
+  test('no AUTH_SECRET blocks readiness — unsigned sessions mean no sign-in', () => {
+    configureMinimum();
+    delete process.env.AUTH_SECRET;
+    const report = inspectEnv();
+    assert.equal(report.ready, false);
+    assert.equal(report.features.auth, false);
+    assert.ok(report.issues.some((i) => i.key === 'AUTH_SECRET' && i.level === 'error'));
+  });
+
+  test('a local database file needs no further configuration', () => {
+    configureMinimum();
+    process.env.DATABASE_URL = 'file:./kiln.db';
+    assert.equal(inspectEnv().features.database, true);
+  });
+
+  test('a remote database without its token is a blocking failure', () => {
+    configureMinimum();
+    process.env.DATABASE_URL = 'libsql://db.turso.io';
+    const report = inspectEnv();
+    assert.equal(report.features.database, false);
+    assert.equal(report.ready, false);
+
+    process.env.DATABASE_AUTH_TOKEN = 'token';
+    assert.equal(inspectEnv().features.database, true);
+  });
+
   test('e2b is judged on its own key, not on the Vercel ones', () => {
+    configureMinimum();
     process.env.SANDBOX_PROVIDER = 'e2b';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
-    process.env.VERCEL_OIDC_TOKEN = 'real-token';
     assert.equal(inspectEnv().features.sandbox, false);
 
     process.env.E2B_API_KEY = 'e2b-real';
@@ -84,17 +118,15 @@ describe('environment inspection', () => {
   });
 
   test('an unknown sandbox provider warns and falls back rather than breaking', () => {
+    configureMinimum();
     process.env.SANDBOX_PROVIDER = 'docker';
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
-    process.env.VERCEL_OIDC_TOKEN = 'real-token';
     const report = inspectEnv();
     assert.equal(report.sandboxProvider, 'vercel');
     assert.ok(report.issues.some((i) => i.key === 'SANDBOX_PROVIDER' && i.level === 'warning'));
   });
 
   test('a missing Firecrawl key degrades rather than blocks', () => {
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-real';
-    process.env.VERCEL_OIDC_TOKEN = 'real-token';
+    configureMinimum();
     const report = inspectEnv();
     assert.equal(report.ready, true, 'building from a description must not need Firecrawl');
     assert.equal(report.features.scraping, false);
@@ -102,8 +134,10 @@ describe('environment inspection', () => {
   });
 
   test('the formatted report is human-readable and leaks no secrets', () => {
+    configureMinimum();
     process.env.ANTHROPIC_API_KEY = 'sk-ant-SUPERSECRET';
     process.env.VERCEL_OIDC_TOKEN = 'tok-SUPERSECRET';
+    process.env.AUTH_SECRET = 'auth-SUPERSECRET';
     const text = formatEnvReport();
     assert.ok(text.includes('ready'));
     assert.ok(!text.includes('SUPERSECRET'), 'the report must never echo key material');

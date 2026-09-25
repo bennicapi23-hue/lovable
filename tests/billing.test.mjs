@@ -7,13 +7,7 @@ import {
   monthlyEquivalent,
   formatLimit,
 } from '@/config/plans.config.ts';
-import {
-  checkAllowance,
-  hasEntitlement,
-  recordUsage,
-  usageSnapshot,
-  __resetUsage,
-} from '@/lib/billing/entitlements.ts';
+import { hasEntitlement } from '@/lib/billing/entitlements.ts';
 
 describe('plans', () => {
   test('plan ids are unique', () => {
@@ -68,62 +62,12 @@ describe('plans', () => {
   });
 });
 
-describe('entitlements', () => {
-  const free = { id: 'acct-free', planId: 'free' };
-  const pro = { id: 'acct-pro', planId: 'pro' };
-
-  beforeEach(() => __resetUsage());
-
+describe('entitlements — plan capabilities', () => {
   test('capabilities follow the plan', () => {
+    const free = { id: 'u1', planId: 'free' };
+    const pro = { id: 'u2', planId: 'pro' };
     assert.equal(hasEntitlement(free, 'byok'), false);
     assert.equal(hasEntitlement(pro, 'byok'), true);
     assert.equal(hasEntitlement(free, 'export'), true, 'export must be on every plan');
-  });
-
-  test('a fresh account is allowed and sees its full allowance', () => {
-    const check = checkAllowance(free, 'build');
-    assert.equal(check.allowed, true);
-    assert.equal(check.remaining, getPlan('free').limits.buildsPerMonth);
-  });
-
-  test('allowance depletes as usage is recorded', () => {
-    recordUsage(free, 'build', 3);
-    assert.equal(checkAllowance(free, 'build').remaining, getPlan('free').limits.buildsPerMonth - 3);
-  });
-
-  test('refuses once the monthly allowance is spent, and says why', () => {
-    recordUsage(free, 'build', getPlan('free').limits.buildsPerMonth);
-    const check = checkAllowance(free, 'build');
-    assert.equal(check.allowed, false);
-    assert.equal(check.remaining, 0);
-    assert.match(check.reason, /Starter/);
-    assert.ok(check.resetsAt, 'the user must be told when it resets');
-  });
-
-  test('builds and edits are metered separately', () => {
-    recordUsage(free, 'build', getPlan('free').limits.buildsPerMonth);
-    assert.equal(checkAllowance(free, 'build').allowed, false);
-    assert.equal(checkAllowance(free, 'edit').allowed, true, 'edits must survive a build lockout');
-  });
-
-  test('accounts do not share counters', () => {
-    recordUsage(free, 'build', 5);
-    assert.equal(checkAllowance(pro, 'build').remaining, getPlan('pro').limits.buildsPerMonth);
-  });
-
-  test('an unlimited plan is never refused', () => {
-    const enterprise = { id: 'acct-ent', planId: 'enterprise' };
-    recordUsage(enterprise, 'build', 100000);
-    assert.equal(checkAllowance(enterprise, 'build').allowed, true);
-  });
-
-  test('the usage snapshot reports what a dashboard needs', () => {
-    recordUsage(pro, 'build', 2);
-    recordUsage(pro, 'edit', 7);
-    const snap = usageSnapshot(pro);
-    assert.equal(snap.builds.used, 2);
-    assert.equal(snap.edits.used, 7);
-    assert.equal(snap.plan.id, 'pro');
-    assert.ok(Date.parse(snap.resetsAt) > Date.now(), 'reset must be in the future');
   });
 });

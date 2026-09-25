@@ -60,3 +60,9 @@ bun.lockb
 
 # Build output
 /.next/
+
+# Local database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

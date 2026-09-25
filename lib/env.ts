@@ -23,7 +23,7 @@ export interface EnvIssue {
   /** What to do about it. */
   fix: string;
   /** Which product capability this affects. */
-  feature: 'ai' | 'sandbox' | 'scraping' | 'fast-apply';
+  feature: 'ai' | 'sandbox' | 'scraping' | 'fast-apply' | 'database' | 'auth';
 }
 
 export interface EnvReport {
@@ -36,6 +36,8 @@ export interface EnvReport {
     sandbox: boolean;
     scraping: boolean;
     fastApply: boolean;
+    database: boolean;
+    auth: boolean;
   };
   sandboxProvider: SandboxProviderName;
   /** Model providers with a usable key, in preference order. */
@@ -140,12 +142,41 @@ export function inspectEnv(): EnvReport {
   /* -------------------------------------------------------- fast apply -- */
   const fastApply = present('MORPH_API_KEY');
 
-  const ready = ai && sandbox;
+  /* ---------------------------------------------------------- database -- */
+  // A missing DATABASE_URL is fine: it falls back to a local file. A remote
+  // URL without its token is not — that fails on the first query instead.
+  const databaseUrl = process.env.DATABASE_URL?.trim() || 'file:./kiln.db';
+  const remoteDb = databaseUrl.startsWith('libsql://') || databaseUrl.startsWith('https://');
+  const database = !remoteDb || present('DATABASE_AUTH_TOKEN');
+
+  if (!database) {
+    issues.push({
+      key: 'DATABASE_AUTH_TOKEN',
+      level: 'error',
+      feature: 'database',
+      message: 'DATABASE_URL points at a remote database but no auth token is set.',
+      fix: 'Add DATABASE_AUTH_TOKEN, or use a local file such as DATABASE_URL=file:./kiln.db.',
+    });
+  }
+
+  /* -------------------------------------------------------------- auth -- */
+  const auth = present('AUTH_SECRET');
+  if (!auth) {
+    issues.push({
+      key: 'AUTH_SECRET',
+      level: 'error',
+      feature: 'auth',
+      message: 'AUTH_SECRET is not set, so sessions cannot be signed and nobody can sign in.',
+      fix: 'Generate one with `openssl rand -base64 32` and put it in .env.local.',
+    });
+  }
+
+  const ready = ai && sandbox && database && auth;
 
   return {
     ready,
     issues,
-    features: { ai, sandbox, scraping, fastApply },
+    features: { ai, sandbox, scraping, fastApply, database, auth },
     sandboxProvider,
     aiProviders,
   };
@@ -166,6 +197,8 @@ export function formatEnvReport(report: EnvReport = inspectEnv()): string {
   lines.push('');
   lines.push(`  Sandbox provider : ${report.sandboxProvider}`);
   lines.push(`  Model providers  : ${report.aiProviders.join(', ') || 'none'}`);
+  lines.push(`  Database         : ${report.features.database ? 'configured' : 'not configured'}`);
+  lines.push(`  Authentication   : ${report.features.auth ? 'configured' : 'not configured'}`);
   lines.push(`  URL rebuild      : ${report.features.scraping ? 'available' : 'unavailable'}`);
   lines.push(`  Fast apply       : ${report.features.fastApply ? 'enabled' : 'disabled'}`);
 

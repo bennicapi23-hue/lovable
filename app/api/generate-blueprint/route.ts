@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateObject } from 'ai';
-import { getProviderForModel } from '@/lib/ai/provider-manager';
+import { getProviderForModel, resolveUsableModel } from '@/lib/ai/provider-manager';
 import { appConfig } from '@/config/app.config';
 import {
   blueprintSchema,
@@ -9,6 +9,7 @@ import {
 } from '@/lib/app-builder/blueprint';
 import { getArchetype, inferArchetype } from '@/lib/app-builder/archetypes';
 import { rateLimit } from '@/lib/security/rate-limit';
+import { resolveAccount } from '@/lib/billing/session';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -28,6 +29,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { success: false, error: 'Too many planning requests. Try again shortly.' },
       { status: 429, headers: limit.headers },
+    );
+  }
+
+  // Planning costs model tokens, so it is behind the same door as building.
+  // It does not spend build allowance: a plan the user rejects should not be
+  // charged for, and making planning free encourages correcting it.
+  const account = await resolveAccount(request);
+  if (!account) {
+    return NextResponse.json(
+      { success: false, error: 'Sign in to plan an app.', signIn: '/sign-in' },
+      { status: 401, headers: limit.headers },
     );
   }
 
@@ -52,8 +64,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const model =
-    typeof body.model === 'string' && body.model ? body.model : appConfig.ai.defaultModel;
+  // Fall back to a model this deployment holds a key for, rather than failing
+  // on the configured default for a provider the operator never set up.
+  const { model, substituted, requested } = resolveUsableModel(
+    typeof body.model === 'string' ? body.model : undefined,
+  );
+  if (substituted) {
+    console.log(`[generate-blueprint] ${requested} is not configured; using ${model}`);
+  }
 
   // An explicitly chosen archetype wins; otherwise infer one from the text.
   const archetype =
@@ -81,7 +99,14 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json(
-      { success: true, blueprint, archetype: archetype?.id ?? blueprint.archetype },
+      {
+        success: true,
+        blueprint,
+        archetype: archetype?.id ?? blueprint.archetype,
+        model,
+        // Surfaced so the UI can say which model actually ran.
+        ...(substituted ? { substitutedFrom: requested } : {}),
+      },
       { headers: limit.headers },
     );
   } catch (error) {

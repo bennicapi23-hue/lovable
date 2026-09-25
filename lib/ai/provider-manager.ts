@@ -76,6 +76,56 @@ function getOrCreateClient(provider: ProviderName, apiKey?: string, baseURL?: st
   return client;
 }
 
+/** Which provider a model id routes to. */
+export function providerForModelId(modelId: string): ProviderName {
+  const configured = appConfig.ai.modelApiConfig?.[modelId as keyof typeof appConfig.ai.modelApiConfig];
+  if (configured) return (configured as { provider: ProviderName }).provider;
+  if (modelId === 'moonshotai/kimi-k2-instruct-0905') return 'groq';
+  if (modelId.startsWith('anthropic/')) return 'anthropic';
+  if (modelId.startsWith('openai/')) return 'openai';
+  if (modelId.startsWith('google/')) return 'google';
+  return 'groq';
+}
+
+/** True when this deployment holds a usable key for that provider. */
+export function isProviderConfigured(provider: ProviderName): boolean {
+  if (isUsingAIGateway) return true;
+  const key = getEnvDefaults(provider).apiKey?.trim();
+  // Placeholders copied out of .env.example are not configuration.
+  return Boolean(key && !/^(your_|xxx|changeme|<)/i.test(key));
+}
+
+/**
+ * Resolves a model the deployment can actually call.
+ *
+ * The configured default is a preference, not a guarantee: an operator who
+ * sets only OPENAI_API_KEY would otherwise see every request fail with a
+ * provider error for a model they never chose. Falling back to an available
+ * model keeps the product usable, and the caller is told when it happened so
+ * the UI can say which model really ran.
+ */
+export function resolveUsableModel(requested?: string): {
+  model: string;
+  substituted: boolean;
+  requested?: string;
+} {
+  const wanted = requested?.trim() || appConfig.ai.defaultModel;
+
+  if (isProviderConfigured(providerForModelId(wanted))) {
+    return { model: wanted, substituted: false };
+  }
+
+  const fallback = appConfig.ai.availableModels.find((candidate) =>
+    isProviderConfigured(providerForModelId(candidate)),
+  );
+
+  // Nothing is configured. Hand back what was asked for so the caller fails
+  // with the provider's own error rather than a confusing substitution.
+  if (!fallback) return { model: wanted, substituted: false };
+
+  return { model: fallback, substituted: fallback !== wanted, requested: wanted };
+}
+
 export function getProviderForModel(modelId: string): ProviderResolution {
   // 1) Check explicit model configuration in app config (custom models)
   const configured = appConfig.ai.modelApiConfig?.[modelId as keyof typeof appConfig.ai.modelApiConfig];

@@ -73,8 +73,33 @@ function CreatePageInner() {
   }, [searchParams, plan]);
 
   const build = useCallback(
-    (approved: AppBlueprint) => {
+    async (approved: AppBlueprint) => {
       setPhase("handing-off");
+
+      // Record the project before building, so the work is recoverable even
+      // if the build itself fails or the tab is closed mid-stream.
+      let projectId: string | null = null;
+      try {
+        const response = await fetch("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: approved.name,
+            tagline: approved.tagline,
+            origin: "create",
+            source: lastRequest.current?.prompt ?? approved.summary,
+            blueprint: approved,
+          }),
+        });
+        if (response.ok) {
+          projectId = (await response.json()).project?.id ?? null;
+        }
+      } catch {
+        // A failed save must not block the build — the user came here to
+        // build, and an unsaved project is better than no project.
+        console.warn("[create] could not save the project; building anyway");
+      }
+
       try {
         // The studio reads these on mount. sessionStorage rather than a query
         // string because a blueprint is far larger than a URL should carry.
@@ -85,7 +110,7 @@ function CreatePageInner() {
           lastRequest.current?.prompt ?? approved.summary,
         );
         sessionStorage.setItem("autoStart", "true");
-        router.push("/generation");
+        router.push(projectId ? `/generation?project=${projectId}` : "/generation");
       } catch {
         setPhase("reviewing");
         toast.error("Could not hand the plan to the studio. Check browser storage settings.");
@@ -104,10 +129,10 @@ function CreatePageInner() {
             <KilnLogo markClassName="w-22 h-22" variant="gradient" />
           </span>
           <a
-            href="/generation"
+            href="/projects"
             className="text-[13.5px] text-white/50 hover:text-white transition-colors"
           >
-            Open studio →
+            Your projects →
           </a>
         </div>
       </header>
@@ -157,7 +182,7 @@ function CreatePageInner() {
           <BlueprintView
             blueprint={blueprint}
             building={phase === "handing-off"}
-            onBuild={build}
+            onBuild={(approved) => { void build(approved); }}
             onReplan={() => {
               const last = lastRequest.current;
               if (last) void plan(last.prompt, last.archetype);

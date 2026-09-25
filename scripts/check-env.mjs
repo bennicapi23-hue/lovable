@@ -42,7 +42,24 @@ const sandboxOk =
     : has('VERCEL_OIDC_TOKEN') ||
       (has('VERCEL_TOKEN') && has('VERCEL_TEAM_ID') && has('VERCEL_PROJECT_ID'));
 
+const dbUrl = (process.env.DATABASE_URL || 'file:./kiln.db').trim();
+const remoteDb = dbUrl.startsWith('libsql://') || dbUrl.startsWith('https://');
+const dbOk = !remoteDb || has('DATABASE_AUTH_TOKEN');
+const authOk = has('AUTH_SECRET');
+
 const issues = [];
+if (!dbOk) {
+  issues.push([
+    'DATABASE_URL is remote but DATABASE_AUTH_TOKEN is missing',
+    'Add DATABASE_AUTH_TOKEN, or use a local file: DATABASE_URL=file:./kiln.db',
+  ]);
+}
+if (!authOk) {
+  issues.push([
+    'AUTH_SECRET is not set — sessions cannot be signed, so nobody can sign in',
+    'Generate one with `openssl rand -base64 32` and add it to .env.local',
+  ]);
+}
 if (aiProviders.length === 0) {
   issues.push([
     'No language model provider configured',
@@ -66,13 +83,15 @@ if (!has('FIRECRAWL_API_KEY')) {
   ]);
 }
 
-const blocking = aiProviders.length === 0 || !sandboxOk;
+const blocking = aiProviders.length === 0 || !sandboxOk || !dbOk || !authOk;
 
 console.log(blocking ? '\n✖ Kiln is not ready to build.\n' : '\n✔ Kiln is configured and ready.\n');
 console.log(`  Sandbox provider : ${provider}`);
 console.log(`  Model providers  : ${aiProviders.join(', ') || 'none'}`);
 console.log(`  URL rebuild      : ${has('FIRECRAWL_API_KEY') ? 'available' : 'unavailable'}`);
 console.log(`  Fast apply       : ${has('MORPH_API_KEY') ? 'enabled' : 'disabled'}`);
+console.log(`  Database         : ${dbOk ? dbUrl : 'not configured'}`);
+console.log(`  Authentication   : ${authOk ? 'configured' : 'not configured'}`);
 
 if (issues.length) {
   console.log('');

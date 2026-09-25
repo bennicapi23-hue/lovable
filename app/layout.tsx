@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Roboto_Mono } from "next/font/google";
 import localFont from "next/font/local";
+import { SessionProvider } from "next-auth/react";
 import { Toaster } from "sonner";
 import { brand, pageTitle } from "@/config/brand.config";
 import "./globals.css";
@@ -79,7 +80,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${geistSans.variable} ${geistMono.variable} ${robotoMono.variable} font-sans`}
       >
-        {children}
+        <SessionProvider>{children}</SessionProvider>
         <Toaster
           position="bottom-right"
           toastOptions={{

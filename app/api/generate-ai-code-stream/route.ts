@@ -11,7 +11,9 @@ import { FileManifest } from '@/types/file-manifest';
 import type { ConversationState, ConversationMessage, ConversationEdit } from '@/types/conversation';
 import { appConfig } from '@/config/app.config';
 import { GREENFIELD_SYSTEM_RULES } from '@/lib/app-builder/build-prompt';
-import { authorizeAction, recordUsage } from '@/lib/billing/entitlements';
+import { resolveUsableModel } from '@/lib/ai/provider-manager';
+import { recordUsage } from '@/lib/billing/entitlements';
+import { authorizeAction } from '@/lib/billing/session';
 import { rateLimit } from '@/lib/security/rate-limit';
 
 // Force dynamic route to enable streaming
@@ -93,7 +95,15 @@ declare global {
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, model = 'openai/gpt-oss-20b', context, isEdit = false, mode } = await request.json();
+    const { prompt, model: requestedModel, context, isEdit = false, mode } = await request.json();
+
+    // Same reasoning as the planner: honour the request when its provider is
+    // configured, otherwise use one that is, rather than failing on a model
+    // the operator never chose.
+    const { model, substituted, requested: originallyRequested } = resolveUsableModel(requestedModel);
+    if (substituted) {
+      console.log(`[generate-ai-code-stream] ${originallyRequested} is not configured; using ${model}`);
+    }
 
     // Generation is the expensive path: it spends model tokens and sandbox
     // time. Rate limit first (cheap, per-IP), then check the plan allowance.
@@ -106,6 +116,17 @@ export async function POST(request: NextRequest) {
     }
 
     const { account, check } = await authorizeAction(request, isEdit ? 'edit' : 'build');
+
+    // Two different refusals: 401 means "sign in", 402 means "you are signed
+    // in but out of allowance". Collapsing them would send an exhausted user
+    // to a sign-in page they are already past.
+    if (!account || check.unauthenticated) {
+      return NextResponse.json(
+        { error: check.reason ?? 'Sign in to build.', signIn: '/sign-in' },
+        { status: 401, headers: limit.headers },
+      );
+    }
+
     if (!check.allowed) {
       return NextResponse.json(
         { error: check.reason, plan: check.plan.id, resetsAt: check.resetsAt, upgrade: '/pricing' },
@@ -121,7 +142,7 @@ export async function POST(request: NextRequest) {
     // The work is going ahead, so the allowance is spent now. Counting here
     // rather than on completion means a stream the user abandons still costs
     // them, which matches what it costs us.
-    recordUsage(account, isEdit ? 'edit' : 'build');
+    await recordUsage(account, isEdit ? 'edit' : 'build');
     
     console.log('[generate-ai-code-stream] Received request:');
     console.log('[generate-ai-code-stream] - prompt:', prompt);
