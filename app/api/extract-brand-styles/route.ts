@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardUrl } from '@/lib/security/url-guard';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const url = body.url;
     const prompt = body.prompt;
+
+    const guard = guardUrl(body.url);
+    if (!guard.ok) {
+      return NextResponse.json({ success: false, error: guard.reason }, { status: 400 });
+    }
+    const url = guard.url!;
 
     console.log('[extract-brand-styles] Extracting brand styles for:', url);
     console.log('[extract-brand-styles] User prompt:', prompt);

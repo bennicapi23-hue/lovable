@@ -1,5 +1,5 @@
-/* Fire Design System - Must be imported first for color definitions */
-@import "./fire.css";
+/* Kiln Design System — must be imported first so colour tokens exist */
+@import "./kiln.css";
 @import "./components/index.css";
 @import "./inside-border-fix.css";
 

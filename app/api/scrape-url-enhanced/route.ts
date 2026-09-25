@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { guardUrl } from '@/lib/security/url-guard';
 
 // Function to sanitize smart quotes and other problematic characters
 function sanitizeQuotes(text: string): string {
@@ -18,15 +19,20 @@ function sanitizeQuotes(text: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const { url } = await request.json();
-    
-    if (!url) {
+    const { url: rawUrl } = await request.json();
+
+    // Never fetch a user-supplied address without checking it first: this
+    // endpoint runs server-side and can otherwise be pointed at internal
+    // services. See lib/security/url-guard.ts.
+    const guard = guardUrl(rawUrl);
+    if (!guard.ok) {
       return NextResponse.json({
         success: false,
-        error: 'URL is required'
+        error: guard.reason
       }, { status: 400 });
     }
-    
+    const url = guard.url!;
+
     console.log('[scrape-url-enhanced] Scraping with Firecrawl:', url);
     
     const FIRECRAWL_API_KEY = process.env.FIRECRAWL_API_KEY;

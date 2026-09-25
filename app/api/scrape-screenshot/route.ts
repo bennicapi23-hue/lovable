@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import FirecrawlApp from '@mendable/firecrawl-js';
+import { guardUrl } from '@/lib/security/url-guard';
 
 export async function POST(req: NextRequest) {
   try {
-    const { url } = await req.json();
-    
-    if (!url) {
-      return NextResponse.json({ error: 'URL is required' }, { status: 400 });
+    const { url: rawUrl } = await req.json();
+
+    const guard = guardUrl(rawUrl);
+    if (!guard.ok) {
+      return NextResponse.json({ error: guard.reason }, { status: 400 });
     }
+    const url = guard.url!;
 
     // Initialize Firecrawl with API key from environment
     const apiKey = process.env.FIRECRAWL_API_KEY;

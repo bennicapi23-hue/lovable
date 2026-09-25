@@ -79,9 +79,19 @@ export const appConfig = {
     
     // Temperature settings for non-reasoning models
     defaultTemperature: 0.7,
-    
-    // Max tokens for code generation
-    maxTokens: 8000,
+
+    // Planning runs cooler than code generation: a blueprint should be a
+    // considered structure, not a creative one. The design direction still
+    // has room to be opinionated at this temperature.
+    blueprintTemperature: 0.4,
+
+    // Max output tokens for an edit or a clone pass.
+    maxTokens: 8192,
+
+    // A greenfield build writes the whole file tree in one response, so it
+    // needs far more room than an edit. Too low and the stream is cut off
+    // mid-file, which yields a tree that will not compile.
+    createMaxTokens: 32000,
     
     // Max tokens for truncation recovery
     truncationRecoveryMaxTokens: 4000,
@@ -102,6 +112,22 @@ export const appConfig = {
     maxTruncationRecoveryAttempts: 1,
   },
   
+  // App creation (greenfield builds from a description)
+  appBuilder: {
+    // Show the blueprint for review before spending tokens on code.
+    // Turning this off builds straight from the description.
+    reviewBlueprintBeforeBuild: true,
+
+    // Ceiling on how much app one build attempt may plan for. Past this the
+    // first build tends to run out of tokens mid-file and produce a broken
+    // tree, which is worse than a smaller app that works.
+    maxPages: 8,
+    maxComponents: 24,
+
+    // Longest description accepted by the planner.
+    maxPromptLength: 4000,
+  },
+
   // UI Configuration
   ui: {
     // Show/hide certain UI elements

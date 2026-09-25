@@ -10,6 +10,9 @@ import { executeSearchPlan, formatSearchResultsForAI, selectTargetFile } from '@
 import { FileManifest } from '@/types/file-manifest';
 import type { ConversationState, ConversationMessage, ConversationEdit } from '@/types/conversation';
 import { appConfig } from '@/config/app.config';
+import { GREENFIELD_SYSTEM_RULES } from '@/lib/app-builder/build-prompt';
+import { authorizeAction, recordUsage } from '@/lib/billing/entitlements';
+import { rateLimit } from '@/lib/security/rate-limit';
 
 // Force dynamic route to enable streaming
 export const dynamic = 'force-dynamic';
@@ -90,11 +93,40 @@ declare global {
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, model = 'openai/gpt-oss-20b', context, isEdit = false } = await request.json();
+    const { prompt, model = 'openai/gpt-oss-20b', context, isEdit = false, mode } = await request.json();
+
+    // Generation is the expensive path: it spends model tokens and sandbox
+    // time. Rate limit first (cheap, per-IP), then check the plan allowance.
+    const limit = await rateLimit(request, { bucket: 'generate', limit: 30, windowMs: 60_000 });
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: 'Too many generation requests. Try again in a moment.' },
+        { status: 429, headers: limit.headers },
+      );
+    }
+
+    const { account, check } = await authorizeAction(request, isEdit ? 'edit' : 'build');
+    if (!check.allowed) {
+      return NextResponse.json(
+        { error: check.reason, plan: check.plan.id, resetsAt: check.resetsAt, upgrade: '/pricing' },
+        { status: 402, headers: limit.headers },
+      );
+    }
+
+    // Create mode is a fresh build from an approved blueprint. It is
+    // mutually exclusive with edit mode, and an edit always wins: an
+    // existing app must never be flattened by a greenfield pass.
+    const isCreate = mode === 'create' && !isEdit;
+
+    // The work is going ahead, so the allowance is spent now. Counting here
+    // rather than on completion means a stream the user abandons still costs
+    // them, which matches what it costs us.
+    recordUsage(account, isEdit ? 'edit' : 'build');
     
     console.log('[generate-ai-code-stream] Received request:');
     console.log('[generate-ai-code-stream] - prompt:', prompt);
     console.log('[generate-ai-code-stream] - isEdit:', isEdit);
+    console.log('[generate-ai-code-stream] - isCreate:', isCreate);
     console.log('[generate-ai-code-stream] - context.sandboxId:', context?.sandboxId);
     console.log('[generate-ai-code-stream] - context.currentFiles:', context?.currentFiles ? Object.keys(context.currentFiles) : 'none');
     console.log('[generate-ai-code-stream] - currentFiles count:', context?.currentFiles ? Object.keys(context.currentFiles).length : 0);
@@ -927,6 +959,13 @@ CRITICAL: When files are provided in the context:
 4. Do NOT ask to see files - they are already provided in the context above
 5. Make the requested change immediately`;
 
+        // Create mode relaxes the file-count limits the base prompt imposes,
+        // which exist to stop edits sprawling. A fresh build is supposed to
+        // write the whole tree in one pass.
+        if (isCreate) {
+          systemPrompt += GREENFIELD_SYSTEM_RULES;
+        }
+
         // If Morph Fast Apply is enabled (edit mode + MORPH_API_KEY), force <edit> block output
         const morphFastApplyEnabled = Boolean(isEdit && process.env.MORPH_API_KEY);
         if (morphFastApplyEnabled) {
@@ -1305,7 +1344,8 @@ If you're running out of space, generate FEWER files but make them COMPLETE.
 It's better to have 3 complete files than 10 incomplete files.`
             }
           ],
-          maxTokens: 8192, // Reduce to ensure completion
+          // A fresh build emits every file at once; an edit touches one or two.
+          maxTokens: isCreate ? appConfig.ai.createMaxTokens : appConfig.ai.maxTokens,
           stopSequences: [] // Don't stop early
           // Note: Neither Groq nor Anthropic models support tool/function calling in this context
           // We use XML tags for package detection instead
@@ -1313,7 +1353,7 @@ It's better to have 3 complete files than 10 incomplete files.`
         
         // Add temperature for non-reasoning models
         if (!model.startsWith('openai/gpt-5')) {
-          streamOptions.temperature = 0.7;
+          streamOptions.temperature = appConfig.ai.defaultTemperature;
         }
         
         // Add reasoning effort for GPT-5 models

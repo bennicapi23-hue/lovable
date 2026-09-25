@@ -1,0 +1,121 @@
+/* ==========================================================================
+   Kiln Design System — brand tokens
+   --------------------------------------------------------------------------
+   Two surfaces, one brand:
+     • Studio  — dark, low-chroma, so generated previews are the brightest
+                 thing on screen. Everything chrome-like recedes.
+     • Canvas  — light, near-white, used by the marketing site and docs.
+
+   Naming: --kiln-<group>-<step>. Steps ascend away from the background,
+   so surface-3 always sits above surface-1 regardless of theme.
+   ========================================================================== */
+
+:root {
+  /* --- Brand ramp: Iris -------------------------------------------------- */
+  --kiln-iris-50:  #f1eefe;
+  --kiln-iris-100: #e2dcfd;
+  --kiln-iris-200: #c6bafb;
+  --kiln-iris-300: #a996f9;
+  --kiln-iris-400: #8a6ff7;
+  --kiln-iris-500: #6244f5;  /* primary */
+  --kiln-iris-600: #4f35db;  /* pressed / gradient end */
+  --kiln-iris-700: #3f2ab0;
+  --kiln-iris-800: #2f1f84;
+  --kiln-iris-900: #1f1458;
+
+  /* --- Glow: the "firing" accent ---------------------------------------
+     Used only for in-progress build state and rare emphasis. If it is on
+     screen, something is happening. */
+  --kiln-glow-300: #f8d089;
+  --kiln-glow-400: #f5c164;
+  --kiln-glow-500: #f2b441;
+  --kiln-glow-600: #d8971f;
+
+  /* --- Neutral ink ------------------------------------------------------- */
+  --kiln-obsidian: #0b0b12;
+  --kiln-ink-900:  #12121c;
+  --kiln-ink-800:  #191926;
+  --kiln-ink-700:  #232334;
+  --kiln-ink-600:  #2f2f44;
+  --kiln-ink-500:  #414159;
+  --kiln-ink-400:  #5c5c78;
+  --kiln-ink-300:  #8b8ba7;
+  --kiln-ink-200:  #b6b6c9;
+  --kiln-ink-100:  #dcdce6;
+  --kiln-porcelain: #fafaf9;
+
+  /* --- Canvas (light) surfaces ------------------------------------------ */
+  --kiln-surface-0: #ffffff;
+  --kiln-surface-1: #fafaf9;
+  --kiln-surface-2: #f4f4f2;
+  --kiln-surface-3: #ececea;
+  --kiln-surface-border: #e6e6e3;
+  --kiln-surface-text: #12121c;
+  --kiln-surface-text-dim: #5c5c78;
+
+  /* --- Studio (dark) surfaces ------------------------------------------- */
+  --kiln-studio-0: #0b0b12;
+  --kiln-studio-1: #12121c;
+  --kiln-studio-2: #191926;
+  --kiln-studio-3: #232334;
+  --kiln-studio-border: #262638;
+  --kiln-studio-text: #f2f2f7;
+  --kiln-studio-text-dim: #8b8ba7;
+
+  /* --- Semantic ---------------------------------------------------------- */
+  --kiln-success: #34c76a;
+  --kiln-warning: #f2b441;
+  --kiln-danger:  #f0544f;
+  --kiln-info:    #4a8df8;
+
+  /* --- Elevation ---------------------------------------------------------
+     Soft, wide and low-opacity: the product should feel like paper under
+     glass, not like a stack of drop-shadowed cards. */
+  --kiln-shadow-sm: 0 1px 2px rgba(11, 11, 18, 0.06),
+                    0 0 0 1px rgba(11, 11, 18, 0.04);
+  --kiln-shadow-md: 0 4px 12px -2px rgba(11, 11, 18, 0.08),
+                    0 0 0 1px rgba(11, 11, 18, 0.05);
+  --kiln-shadow-lg: 0 24px 48px -12px rgba(11, 11, 18, 0.14),
+                    0 0 0 1px rgba(11, 11, 18, 0.05);
+  --kiln-shadow-glow: 0 0 0 1px rgba(98, 68, 245, 0.28),
+                      0 8px 32px -8px rgba(98, 68, 245, 0.40);
+
+  /* --- Radii -------------------------------------------------------------- */
+  --kiln-radius-xs: 6px;
+  --kiln-radius-sm: 10px;
+  --kiln-radius-md: 14px;
+  --kiln-radius-lg: 20px;
+  --kiln-radius-xl: 28px;
+
+  /* --- Motion -------------------------------------------------------------
+     One easing curve for everything that moves. Consistency reads as
+     craft; variety reads as accident. */
+  --kiln-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --kiln-ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --kiln-duration-fast: 140ms;
+  --kiln-duration: 240ms;
+  --kiln-duration-slow: 480ms;
+
+  /* --- Signature gradients ------------------------------------------------ */
+  --kiln-gradient-brand: linear-gradient(135deg, #6244f5 0%, #8a6ff7 50%, #f2b441 140%);
+  --kiln-gradient-firing: linear-gradient(90deg, #6244f5, #f2b441, #6244f5);
+}
+
+/* P3 refinement — richer primary on displays that can show it. */
+@supports (color: color(display-p3 1 1 1)) {
+  :root {
+    --kiln-iris-400: color(display-p3 0.541176 0.435294 0.968627);
+    --kiln-iris-500: color(display-p3 0.384314 0.266667 0.960784);
+    --kiln-iris-600: color(display-p3 0.309804 0.207843 0.858824);
+    --kiln-glow-500: color(display-p3 0.949020 0.705882 0.254902);
+  }
+}
+
+/* Respect the OS setting for anyone who does not want motion. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --kiln-duration-fast: 1ms;
+    --kiln-duration: 1ms;
+    --kiln-duration-slow: 1ms;
+  }
+}

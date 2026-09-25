@@ -25,6 +25,8 @@ import {
 } from '@/lib/icons';
 import { motion } from 'framer-motion';
 import CodeApplicationProgress, { type CodeApplicationState } from '@/components/CodeApplicationProgress';
+import { buildGreenfieldPrompt } from '@/lib/app-builder/build-prompt';
+import type { AppBlueprint } from '@/lib/app-builder/blueprint';
 
 interface SandboxData {
   sandboxId: string;
@@ -91,6 +93,12 @@ function AISandboxPage() {
   const [homeScreenFading, setHomeScreenFading] = useState(false);
   const [homeUrlInput, setHomeUrlInput] = useState('');
   const [homeContextInput, setHomeContextInput] = useState('');
+  // Greenfield build handed over from /create. Held in a ref as well as
+  // state because startGeneration runs inside a timeout and would
+  // otherwise close over a stale value.
+  const [isCreateMode, setIsCreateMode] = useState(false);
+  const blueprintRef = useRef<AppBlueprint | null>(null);
+  const createPromptRef = useRef<string>('');
   const [activeTab, setActiveTab] = useState<'generation' | 'preview'>('preview');
   const [showStyleSelector, setShowStyleSelector] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
@@ -169,6 +177,28 @@ function AISandboxPage() {
       // Prevent double execution in React StrictMode
       if (sandboxCreated) return;
       
+      // A blueprint approved in /create takes precedence over any URL:
+      // the user has already told us exactly what to build.
+      const storedBlueprint = sessionStorage.getItem('kilnBlueprint');
+      if (storedBlueprint && sessionStorage.getItem('kilnBuildMode') === 'create') {
+        try {
+          blueprintRef.current = JSON.parse(storedBlueprint) as AppBlueprint;
+          createPromptRef.current = sessionStorage.getItem('kilnBuildPrompt') || '';
+          setIsCreateMode(true);
+          setHasInitialSubmission(true);
+          setShowHomeScreen(false);
+          setHomeScreenFading(false);
+          setShouldAutoGenerate(true);
+        } catch (e) {
+          console.error('[generation] Could not read the approved blueprint:', e);
+          addChatMessage('That build plan could not be read. Please plan the app again.', 'error');
+        } finally {
+          sessionStorage.removeItem('kilnBlueprint');
+          sessionStorage.removeItem('kilnBuildMode');
+          sessionStorage.removeItem('kilnBuildPrompt');
+        }
+      }
+
       // First check URL parameters (from home page navigation)
       const urlParam = searchParams.get('url');
       const templateParam = searchParams.get('template');
@@ -335,15 +365,15 @@ function AISandboxPage() {
   // Auto-start generation if flagged
   useEffect(() => {
     const autoStart = sessionStorage.getItem('autoStart');
-    if (autoStart === 'true' && !showHomeScreen && homeUrlInput) {
+    if (autoStart === 'true' && !showHomeScreen && (homeUrlInput || isCreateMode)) {
       sessionStorage.removeItem('autoStart');
       // Small delay to ensure everything is ready
       setTimeout(() => {
-        console.log('[generation] Auto-starting generation for URL:', homeUrlInput);
+        console.log('[generation] Auto-starting generation:', isCreateMode ? 'create mode' : homeUrlInput);
         startGeneration();
       }, 1000);
     }
-  }, [showHomeScreen, homeUrlInput]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showHomeScreen, homeUrlInput, isCreateMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   useEffect(() => {
@@ -363,7 +393,7 @@ function AISandboxPage() {
 
   // Auto-trigger generation when flag is set (from home page navigation)
   useEffect(() => {
-    if (shouldAutoGenerate && homeUrlInput && !showHomeScreen) {
+    if (shouldAutoGenerate && (homeUrlInput || isCreateMode) && !showHomeScreen) {
       // Reset the flag
       setShouldAutoGenerate(false);
       
@@ -376,7 +406,7 @@ function AISandboxPage() {
       return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shouldAutoGenerate, homeUrlInput, showHomeScreen]);
+  }, [shouldAutoGenerate, homeUrlInput, showHomeScreen, isCreateMode]);
 
   const updateStatus = (text: string, active: boolean) => {
     setStatus({ text, active });
@@ -2632,7 +2662,15 @@ Tip: I automatically detect and install npm packages from your code imports (lik
   };
 
   const startGeneration = async () => {
-    if (!homeUrlInput.trim()) return;
+    const activeBlueprint = blueprintRef.current;
+    // Either we have an approved plan to build, or a URL to rebuild.
+    if (!activeBlueprint && !homeUrlInput.trim()) return;
+
+    // A blueprint is consumed by the build it starts. Everything below reads
+    // the local copy, so clearing it here stops a later rebuild in the same
+    // session from silently re-running in create mode.
+    blueprintRef.current = null;
+    if (activeBlueprint) setIsCreateMode(false);
     
     setHomeScreenFading(true);
     
@@ -2659,9 +2697,11 @@ Tip: I automatically detect and install npm packages from your code imports (lik
     const brandExtensionMode = sessionStorage.getItem('brandExtensionMode') === 'true';
 
     addChatMessage(
-      brandExtensionMode
-        ? `Analyzing brand from ${cleanUrl}...`
-        : `Starting to clone ${cleanUrl}...`,
+      activeBlueprint
+        ? `Building ${activeBlueprint.name}…`
+        : brandExtensionMode
+          ? `Analyzing brand from ${cleanUrl}...`
+          : `Starting to clone ${cleanUrl}...`,
       'system'
     );
     
@@ -2674,8 +2714,11 @@ Tip: I automatically detect and install npm packages from your code imports (lik
     setActiveTab('preview');
     
     // Always capture screenshot for new URLs, even if sandbox exists
-    // This ensures the loading screen shows properly
-    captureUrlScreenshot(displayUrl);
+    // This ensures the loading screen shows properly. A greenfield build has
+    // no source site, so there is nothing to capture.
+    if (!activeBlueprint) {
+      captureUrlScreenshot(displayUrl);
+    }
     
     setTimeout(async () => {
       setShowHomeScreen(false);
@@ -2692,7 +2735,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
       // Now start the clone process which will stream the generation
       setUrlInput(homeUrlInput);
       setUrlOverlayVisible(false); // Make sure overlay is closed
-      setUrlStatus(['Scraping website content...']);
+      setUrlStatus(activeBlueprint ? ['Preparing the build…'] : ['Scraping website content...']);
       
       try {
         // Scrape the website
@@ -2710,7 +2753,14 @@ Tip: I automatically detect and install npm packages from your code imports (lik
         let scrapeData: ScrapeData | undefined;
         let brandGuidelines: any;
 
-        if (brandExtensionMode) {
+        if (activeBlueprint) {
+          // === CREATE MODE ===
+          // Nothing to scrape: the approved blueprint is the source of truth.
+          setConversationContext(prev => ({
+            ...prev,
+            currentProject: activeBlueprint.name
+          }));
+        } else if (brandExtensionMode) {
           // === BRAND EXTENSION MODE ===
           addChatMessage('Extracting brand styles from the website...', 'system');
 
@@ -2779,7 +2829,13 @@ Tip: I automatically detect and install npm packages from your code imports (lik
         }
         }
 
-        setUrlStatus(brandExtensionMode ? ['Brand styles extracted!', 'Building your component...'] : ['Website scraped successfully!', 'Generating React app...']);
+        setUrlStatus(
+          activeBlueprint
+            ? ['Plan approved!', `Writing ${activeBlueprint.components.length} files...`]
+            : brandExtensionMode
+              ? ['Brand styles extracted!', 'Building your component...']
+              : ['Website scraped successfully!', 'Generating React app...']
+        );
 
         // Clear preparing design state and switch to generation tab
         setIsPreparingDesign(false);
@@ -2799,7 +2855,16 @@ Tip: I automatically detect and install npm packages from your code imports (lik
         // Build the appropriate prompt based on mode
         let prompt;
 
-        if (brandExtensionMode && brandGuidelines) {
+        if (activeBlueprint) {
+          // === CREATE MODE PROMPT ===
+          // Written from the blueprint the user already approved, so the
+          // generator transcribes a decided structure instead of inventing one.
+          prompt = buildGreenfieldPrompt(
+            activeBlueprint,
+            createPromptRef.current || activeBlueprint.summary,
+            homeContextInput || undefined
+          );
+        } else if (brandExtensionMode && brandGuidelines) {
           // === BRAND EXTENSION PROMPT ===
           // Store brand guidelines in conversation context
           setConversationContext(prev => ({
@@ -3020,10 +3085,12 @@ Focus on the key sections and content, making it clean and modern.`;
           body: JSON.stringify({ 
             prompt,
             model: aiModel,
+            mode: activeBlueprint ? 'create' : undefined,
             context: {
               sandboxId: sandboxData?.sandboxId,
               structure: structureContent,
-              conversationContext: conversationContext
+              conversationContext: conversationContext,
+              blueprint: activeBlueprint ?? undefined
             }
           })
         });
