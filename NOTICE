@@ -1,0 +1,37 @@
+Kiln Studio
+Copyright (c) 2026 Kiln Studio
+
+This product is a derivative work of open-lovable, created by Firecrawl and
+its contributors, and distributed under the MIT License.
+
+  Upstream project: https://github.com/firecrawl/open-lovable
+  Upstream licence: MIT
+  Copyright (c) 2024 Firecrawl and the open-lovable contributors
+
+The MIT License permits commercial use, modification and distribution of the
+upstream work provided the copyright notice and permission notice are retained.
+Both are reproduced in full in the LICENSE file at the root of this repository.
+
+WHAT CHANGED
+------------
+Kiln is a substantially modified derivative rather than a redistribution of
+upstream. In particular it adds:
+
+  * A build-from-description pipeline (lib/app-builder/*, the blueprint
+    planning API, and the /create approval flow), which upstream does not have.
+  * Its own brand, design token layer and marketing surface.
+  * A commercial layer: plans, entitlements and usage metering.
+  * Platform hardening: SSRF protection on URL-fetching routes, rate limiting,
+    validated environment configuration and a keyed sandbox registry.
+
+TRADEMARKS
+----------
+"Firecrawl" is a trademark of its owner. This project is not affiliated with,
+endorsed by, or sponsored by Firecrawl. Firecrawl is referenced here solely to
+comply with the attribution requirement of the MIT License, and as the name of
+an API this software can be configured to call.
+
+THIRD-PARTY DEPENDENCIES
+------------------------
+This product bundles third-party packages, each under its own licence. Run
+`pnpm licenses list` for the full resolved list for your installed tree.

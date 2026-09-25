@@ -62,9 +62,22 @@ function isPrivateIPv6(host: string): boolean {
   if (h === '::' || h === '::1') return true;      // unspecified, loopback
   if (h.startsWith('fe80')) return true;           // link-local
   if (/^f[cd]/.test(h)) return true;               // unique local fc00::/7
-  // IPv4-mapped (::ffff:10.0.0.1) inherits the IPv4 rules.
-  const mapped = h.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (mapped) return isPrivateIPv4(mapped[1]);
+
+  // IPv4-mapped addresses inherit the IPv4 rules. Two spellings reach here:
+  // the dotted form a user typed (::ffff:10.0.0.1) and the hex form the URL
+  // parser normalises it into (::ffff:a00:1). Missing the second one would
+  // leave every private IPv4 address reachable behind an IPv6 literal.
+  const dotted = h.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) return isPrivateIPv4(dotted[1]);
+
+  const hex = h.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const high = parseInt(hex[1], 16);
+    const low = parseInt(hex[2], 16);
+    const ipv4 = [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
+    return isPrivateIPv4(ipv4);
+  }
+
   return false;
 }
 

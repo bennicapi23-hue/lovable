@@ -1,0 +1,37 @@
+{
+  "name": "create-kiln",
+  "version": "1.0.0",
+  "description": "CLI to bootstrap a Kiln install with your choice of sandbox provider",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "create-kiln": "./index.js"
+  },
+  "scripts": {
+    "test": "node index.js --dry-run"
+  },
+  "keywords": [
+    "kiln",
+    "ai",
+    "app-builder",
+    "code-generation",
+    "sandbox",
+    "e2b",
+    "vercel"
+  ],
+  "author": "Kiln Studio",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^11.1.0",
+    "fs-extra": "^11.2.0",
+    "inquirer": "^9.2.12",
+    "ora": "^7.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
