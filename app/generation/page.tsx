@@ -28,6 +28,7 @@ import { motion } from 'framer-motion';
 import CodeApplicationProgress, { type CodeApplicationState } from '@/components/CodeApplicationProgress';
 import { buildGreenfieldPrompt } from '@/lib/app-builder/build-prompt';
 import type { AppBlueprint } from '@/lib/app-builder/blueprint';
+import { describeApiError } from '@/lib/api-error';
 
 interface SandboxData {
   sandboxId: string;
@@ -1838,7 +1839,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
       });
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(await describeApiError(response, 'Could not apply that change.'));
       }
       
       const reader = response.body?.getReader();
@@ -3097,7 +3098,9 @@ Focus on the key sections and content, making it clean and modern.`;
         });
         
         if (!aiResponse.ok || !aiResponse.body) {
-          throw new Error('Failed to generate code');
+          // Surface the server's own explanation — a quota refusal carries the
+          // plan and an upgrade path, and a rate limit carries a retry time.
+          throw new Error(await describeApiError(aiResponse, 'Could not generate the app.'));
         }
         
         const reader = aiResponse.body.getReader();

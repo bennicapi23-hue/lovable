@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appConfig } from '@/config/app.config';
 import { getArchetype, inferArchetype, type AppArchetype } from './archetypes';
 
 /**
@@ -152,6 +153,9 @@ export function normaliseBlueprint(
     inferArchetype(raw.summary ?? '')?.id ??
     'landing-page';
 
+  // Cap the plan. A model asked for "an ERP" will happily plan forty screens,
+  // and the build then runs out of tokens mid-file and leaves a tree that does
+  // not compile. A smaller app that works beats a bigger one that does not.
   const pages = (raw.pages ?? [])
     .filter((p) => p?.name?.trim())
     .map((p) => ({
@@ -159,11 +163,13 @@ export function normaliseBlueprint(
       name: p.name.trim(),
       route: p.route?.trim() || '/',
       sections: (p.sections ?? []).filter(Boolean),
-    }));
+    }))
+    .slice(0, appConfig.appBuilder.maxPages);
 
   const components = (raw.components ?? [])
     .filter((c) => c?.name?.trim() && c?.file?.trim())
-    .map((c) => ({ ...c, name: c.name.trim(), file: normaliseFilePath(c.file) }));
+    .map((c) => ({ ...c, name: c.name.trim(), file: normaliseFilePath(c.file) }))
+    .slice(0, appConfig.appBuilder.maxComponents);
 
   // The generator always writes an entry component; make sure the plan says so
   // rather than letting the model omit it and then import it anyway.
@@ -174,6 +180,10 @@ export function normaliseBlueprint(
       role: 'Application shell: routing, layout and page composition.',
     });
   }
+
+  const trimmedPages = (raw.pages ?? []).length > appConfig.appBuilder.maxPages;
+  const trimmedComponents =
+    (raw.components ?? []).length > appConfig.appBuilder.maxComponents;
 
   return {
     ...raw,
@@ -189,7 +199,15 @@ export function normaliseBlueprint(
     dataModel: (raw.dataModel ?? []).filter((d) => d?.entity?.trim()),
     features: (raw.features ?? []).filter((f) => f?.name?.trim()),
     packages: dedupe((raw.packages ?? []).map((p) => p.trim()).filter(Boolean)),
-    notes: (raw.notes ?? []).filter(Boolean),
+    notes: [
+      ...(raw.notes ?? []).filter(Boolean),
+      ...(trimmedPages
+        ? [`Trimmed to ${appConfig.appBuilder.maxPages} screens for a first build; the rest can be added by asking for them.`]
+        : []),
+      ...(trimmedComponents
+        ? [`Trimmed to ${appConfig.appBuilder.maxComponents} components for a first build.`]
+        : []),
+    ],
   };
 }
 

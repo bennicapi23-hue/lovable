@@ -11,6 +11,7 @@ import {
   installablePackages,
 } from '@/lib/app-builder/blueprint.ts';
 import { buildGreenfieldPrompt } from '@/lib/app-builder/build-prompt.ts';
+import { appConfig } from '@/config/app.config.ts';
 
 /** A minimal plan shaped like what the model returns. */
 function sampleBlueprint(overrides = {}) {
@@ -129,6 +130,42 @@ describe('normaliseBlueprint', () => {
   test('falls back to a known archetype when the model invents one', () => {
     const result = normaliseBlueprint(sampleBlueprint({ archetype: 'not-a-real-archetype' }));
     assert.ok(getArchetype(result.archetype), 'archetype must resolve');
+  });
+
+  test('caps an over-ambitious plan so the build does not run out of tokens', () => {
+    const many = (n, make) => Array.from({ length: n }, (_, i) => make(i));
+    const result = normaliseBlueprint(
+      sampleBlueprint({
+        pages: many(30, (i) => ({
+          name: `Page ${i}`, route: `/p${i}`, purpose: 'p', sections: [],
+        })),
+        components: many(80, (i) => ({
+          name: `C${i}`, file: `components/C${i}.jsx`, role: 'r',
+        })),
+      }),
+    );
+    assert.equal(result.pages.length, appConfig.appBuilder.maxPages);
+    // +1 for the App shell normaliseBlueprint guarantees.
+    assert.ok(result.components.length <= appConfig.appBuilder.maxComponents + 1);
+  });
+
+  test('says when it trimmed, rather than shortening the plan silently', () => {
+    const result = normaliseBlueprint(
+      sampleBlueprint({
+        pages: Array.from({ length: 30 }, (_, i) => ({
+          name: `Page ${i}`, route: `/p${i}`, purpose: 'p', sections: [],
+        })),
+      }),
+    );
+    assert.ok(
+      result.notes.some((n) => /trimmed/i.test(n)),
+      'a trimmed plan must say so in its notes',
+    );
+  });
+
+  test('a plan within the caps gains no trimming note', () => {
+    const result = normaliseBlueprint(sampleBlueprint());
+    assert.ok(!result.notes.some((n) => /trimmed/i.test(n)));
   });
 
   test('never leaves the app nameless', () => {

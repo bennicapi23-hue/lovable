@@ -10,6 +10,7 @@ import KilnLogo from "@/components/brand/KilnLogo";
 import KilnMark from "@/components/brand/KilnMark";
 import type { AppBlueprint } from "@/lib/app-builder/blueprint";
 import { appConfig } from "@/config/app.config";
+import { describeApiError } from "@/lib/api-error";
 
 type Phase = "composing" | "planning" | "reviewing" | "handing-off";
 
@@ -42,9 +43,13 @@ function CreatePageInner() {
         }),
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        // Quota and rate-limit refusals carry a reason and a way out.
+        throw new Error(await describeApiError(response, "The planner could not run."));
+      }
 
-      if (!response.ok || !data.success) {
+      const data = await response.json();
+      if (!data.success) {
         throw new Error(data.error || "The planner did not return a plan.");
       }
 

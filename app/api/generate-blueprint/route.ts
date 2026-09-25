@@ -13,7 +13,7 @@ import { rateLimit } from '@/lib/security/rate-limit';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const MAX_PROMPT_LENGTH = 4000;
+const MAX_PROMPT_LENGTH = appConfig.appBuilder.maxPromptLength;
 
 /**
  * POST /api/generate-blueprint
@@ -63,11 +63,15 @@ export async function POST(request: NextRequest) {
   try {
     const { client, actualModel } = getProviderForModel(model);
 
+    // Reasoning models reject an explicit temperature, so omit it for them
+    // rather than failing the whole planning call over a sampling hint.
+    const isReasoningModel = model.startsWith('openai/gpt-5');
+
     const { object } = await generateObject({
       model: client(actualModel),
       schema: blueprintSchema,
       prompt: buildPlannerPrompt(prompt, archetype),
-      temperature: appConfig.ai.blueprintTemperature,
+      ...(isReasoningModel ? {} : { temperature: appConfig.ai.blueprintTemperature }),
       maxRetries: 2,
     });
 
