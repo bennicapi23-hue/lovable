@@ -1345,7 +1345,10 @@ It's better to have 3 complete files than 10 incomplete files.`
             }
           ],
           // A fresh build emits every file at once; an edit touches one or two.
-          maxTokens: isCreate ? appConfig.ai.createMaxTokens : appConfig.ai.maxTokens,
+          // The option is maxOutputTokens in the AI SDK v5 — `maxTokens` is
+          // silently ignored, which is why generations were running against
+          // the provider default rather than this ceiling.
+          maxOutputTokens: isCreate ? appConfig.ai.createMaxTokens : appConfig.ai.maxTokens,
           stopSequences: [] // Don't stop early
           // Note: Neither Groq nor Anthropic models support tool/function calling in this context
           // We use XML tags for package detection instead
