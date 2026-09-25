@@ -45,57 +45,148 @@ export default function HomePage() {
 
 function Hero() {
   return (
-    <section className="relative overflow-hidden pt-140 pb-96">
-      {/* Ambient light. Decorative only. */}
+    <section className="relative overflow-hidden pt-140 pb-88">
+      {/* Ambient light. Decorative only — the glow sits behind the composer so
+          the input surface reads as the lit thing on the page. */}
       <div className="pointer-events-none absolute inset-0" aria-hidden>
-        <div className="absolute -top-[36%] left-1/2 -translate-x-1/2 w-[1000px] h-[760px] rounded-full opacity-[0.18] blur-[150px] bg-[radial-gradient(circle,#6244f5_0%,transparent_65%)]" />
-        <div className="absolute top-[8%] -right-[12%] w-[560px] h-[560px] rounded-full opacity-[0.07] blur-[130px] bg-[radial-gradient(circle,#f2b441_0%,transparent_65%)]" />
+        <div className="absolute -top-[28%] left-[18%] w-[980px] h-[780px] rounded-full opacity-[0.34] blur-[130px] bg-[radial-gradient(circle,#6244f5_0%,transparent_62%)]" />
+        <div className="absolute top-[26%] -right-[6%] w-[620px] h-[620px] rounded-full opacity-[0.14] blur-[120px] bg-[radial-gradient(circle,#f2b441_0%,transparent_62%)]" />
+        <div className="absolute top-[52%] -left-[10%] w-[520px] h-[520px] rounded-full opacity-[0.16] blur-[120px] bg-[radial-gradient(circle,#8a6ff7_0%,transparent_62%)]" />
         <div
-          className="absolute inset-0 opacity-[0.16]"
+          className="absolute inset-0 opacity-[0.5]"
           style={{
             backgroundImage:
-              "linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.045) 1px, transparent 1px)",
-            backgroundSize: "72px 72px",
+              "linear-gradient(to right, rgba(255,255,255,0.055) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.055) 1px, transparent 1px)",
+            backgroundSize: "64px 64px",
             maskImage:
-              "radial-gradient(ellipse 80% 55% at 50% 30%, black 20%, transparent 75%)",
+              "radial-gradient(ellipse 90% 60% at 45% 35%, black 10%, transparent 70%)",
             WebkitMaskImage:
-              "radial-gradient(ellipse 80% 55% at 50% 30%, black 20%, transparent 75%)",
+              "radial-gradient(ellipse 90% 60% at 45% 35%, black 10%, transparent 70%)",
           }}
         />
       </div>
 
       <div className="relative mx-auto max-w-[1160px] px-24">
-        <div className="max-w-[760px]">
-          <span className="inline-flex items-center gap-8 h-30 pl-8 pr-14 rounded-full border border-white/10 bg-white/[0.04] text-[12.5px] text-white/60">
-            <KilnMark className="w-16 h-16" variant="firing" />
-            Plan first, then build
-          </span>
-
-          <h1 className="mt-24 text-[clamp(42px,7.2vw,76px)] leading-[1.02] font-semibold tracking-[-0.035em] text-white">
-            Describe it.
-            <br />
-            <span className="bg-[linear-gradient(100deg,#ffffff_0%,#c6bafb_46%,#f5c164_100%)] bg-clip-text text-transparent">
-              Ship it.
+        <div className="grid gap-56 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+          <div>
+            <span className="inline-flex items-center gap-8 h-30 pl-8 pr-14 rounded-full border border-white/10 bg-white/[0.04] text-[12.5px] text-white/60">
+              <KilnMark className="w-16 h-16" variant="firing" />
+              Plan first, then build
             </span>
-          </h1>
 
-          <p className="mt-24 text-[18px] leading-[1.6] text-white/60 max-w-[56ch]">
-            Kiln turns a sentence into a running React app. It writes a plan
-            first — screens, data, design direction — you approve it, and then
-            it builds in a live sandbox you can watch, edit and export.
-          </p>
+            <h1 className="mt-24 text-[clamp(42px,6.4vw,68px)] leading-[1.02] font-semibold tracking-[-0.035em] text-white">
+              Describe it.
+              <br />
+              <span className="bg-[linear-gradient(100deg,#ffffff_0%,#c6bafb_46%,#f5c164_100%)] bg-clip-text text-transparent">
+                Ship it.
+              </span>
+            </h1>
+
+            <p className="mt-24 text-[17.5px] leading-[1.6] text-white/60 max-w-[52ch]">
+              Kiln turns a sentence into a running React app. It writes a plan
+              first — screens, data, design direction — you approve it, and then
+              it builds in a live sandbox you can watch, edit and export.
+            </p>
+
+            <div className="mt-36">
+              <AppComposer defaultMode="build" size="hero" />
+            </div>
+
+            <p className="mt-20 text-[13px] text-white/35">
+              No credit card. {PLANS[0].limits.buildsPerMonth} builds a month on
+              the free plan.
+            </p>
+          </div>
+
+          {/* Shows the thing the copy is claiming, rather than restating it. */}
+          <BlueprintPeek />
         </div>
-
-        <div className="mt-40 max-w-[760px]">
-          <AppComposer defaultMode="build" size="hero" />
-        </div>
-
-        <p className="mt-20 text-[13px] text-white/35">
-          No credit card. {PLANS[0].limits.buildsPerMonth} builds a month on the
-          free plan.
-        </p>
       </div>
     </section>
+  );
+}
+
+/**
+ * A still of the approval step. Static by design: it is an illustration of the
+ * output, not a live widget, so it stays honest and costs nothing to render.
+ */
+function BlueprintPeek() {
+  const screens = [
+    ["Jobs", "/"],
+    ["Customers", "/customers"],
+    ["Invoices", "/invoices"],
+  ];
+  const swatches = ["#2E7D5B", "#E8B04B", "#F5F3EE", "#1B1B18"];
+
+  return (
+    <aside className="hidden lg:block" aria-label="Example of a generated plan">
+      <div className="rounded-16 border border-white/10 bg-white/[0.035] backdrop-blur-sm p-20 shadow-[0_32px_80px_-32px_rgba(0,0,0,0.9)]">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-[0.1em] text-white/35">
+            Plan
+          </span>
+          <span className="inline-flex items-center gap-6 text-[11px] text-kiln-glow-400">
+            <span className="w-5 h-5 rounded-full bg-kiln-glow-500" aria-hidden />
+            Awaiting approval
+          </span>
+        </div>
+
+        <h3 className="mt-14 text-[19px] font-medium text-white">Pipewright</h3>
+        <p className="mt-2 text-[13px] text-white/45">Job tracking for plumbers</p>
+
+        <dl className="mt-18 space-y-14">
+          <div>
+            <dt className="text-[11px] uppercase tracking-[0.08em] text-white/30 mb-7">
+              Screens
+            </dt>
+            <dd className="space-y-5">
+              {screens.map(([name, route]) => (
+                <div key={route} className="flex items-baseline gap-8">
+                  <span className="text-[13px] text-white/75">{name}</span>
+                  <code className="text-[11px] font-mono text-kiln-iris-300">{route}</code>
+                </div>
+              ))}
+            </dd>
+          </div>
+
+          <div>
+            <dt className="text-[11px] uppercase tracking-[0.08em] text-white/30 mb-7">
+              Data
+            </dt>
+            <dd className="font-mono text-[11.5px] leading-[1.7] text-white/45">
+              Customer · Job · Invoice
+            </dd>
+          </div>
+
+          <div>
+            <dt className="text-[11px] uppercase tracking-[0.08em] text-white/30 mb-7">
+              Direction
+            </dt>
+            <dd>
+              <p className="text-[13px] text-white/60 leading-[1.5]">
+                Workmanlike, high contrast, one warm accent.
+              </p>
+              <div className="mt-9 flex gap-6" aria-hidden>
+                {swatches.map((hex) => (
+                  <span
+                    key={hex}
+                    className="w-22 h-22 rounded-6 border border-white/12"
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+            </dd>
+          </div>
+        </dl>
+
+        <div className="mt-20 pt-16 border-t border-white/8 flex items-center gap-8">
+          <span className="inline-flex items-center h-30 px-14 rounded-full bg-kiln-iris-500 text-white text-[12.5px] font-medium">
+            Build this app
+          </span>
+          <span className="text-[12.5px] text-white/35">or change it first</span>
+        </div>
+      </div>
+    </aside>
   );
 }
 

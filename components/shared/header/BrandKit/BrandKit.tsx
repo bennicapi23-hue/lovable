@@ -20,9 +20,10 @@ import Icon from "./_svg/Icon";
 /** The mark, as a standalone file. Kept here so "copy" and "download" agree. */
 const MARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <defs>
-    <linearGradient id="chamber" x1="8" y1="22" x2="16" y2="9" gradientUnits="userSpaceOnUse">
+    <linearGradient id="chamber" x1="12" y1="22" x2="12" y2="11" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#4f35db"/>
-      <stop offset="55%" stop-color="#8a6ff7"/>
+      <stop offset="52%" stop-color="#6244f5"/>
+      <stop offset="86%" stop-color="#a996f9"/>
       <stop offset="100%" stop-color="#f2b441"/>
     </linearGradient>
   </defs>

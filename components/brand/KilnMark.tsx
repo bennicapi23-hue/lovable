@@ -47,9 +47,10 @@ export default function KilnMark({
 
       {variant !== 'solid' && (
         <defs>
-          <linearGradient id={`${uid}-chamber`} x1="8" y1="22" x2="16" y2="9">
+          <linearGradient id={`${uid}-chamber`} x1="12" y1="22" x2="12" y2="11" gradientUnits="userSpaceOnUse">
             <stop offset="0%" stopColor="var(--kiln-iris-600, #4f35db)" />
-            <stop offset="55%" stopColor="var(--kiln-iris-400, #8a6ff7)" />
+            <stop offset="52%" stopColor="var(--kiln-iris-500, #6244f5)" />
+            <stop offset="86%" stopColor="var(--kiln-iris-300, #a996f9)" />
             <stop offset="100%" stopColor="var(--kiln-glow-500, #f2b441)" />
           </linearGradient>
         </defs>
