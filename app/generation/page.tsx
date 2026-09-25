@@ -6,7 +6,8 @@ import Image from 'next/image';
 import { appConfig } from '@/config/app.config';
 import HeroInput from '@/components/HeroInput';
 import SidebarInput from '@/components/app/generation/SidebarInput';
-import HeaderBrandKit from '@/components/shared/header/BrandKit/BrandKit';
+import Link from 'next/link';
+import KilnLogo from '@/components/brand/KilnLogo';
 import { HeaderProvider } from '@/components/shared/header/HeaderContext';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -1274,7 +1275,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
                                       {fileInfo.name}
                                       {fileInfo.edited && (
                                         <span className={`text-[10px] px-1 rounded ${
-                                          isSelected ? 'bg-blue-400' : 'bg-orange-500 text-white'
+                                          isSelected ? 'bg-blue-400' : 'bg-kiln-iris-500 text-white'
                                         }`}>✓</span>
                                       )}
                                     </span>
@@ -1391,7 +1392,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
                     <div className="bg-black border border-gray-200 rounded-lg overflow-hidden">
                       <div className="px-4 py-2 bg-gray-100 text-gray-900 flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="w-16 h-16 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                          <div className="w-16 h-16 border-2 border-kiln-iris-500 border-t-transparent rounded-full animate-spin" />
                           <span className="font-mono text-sm">Streaming code...</span>
                         </div>
                       </div>
@@ -1409,7 +1410,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
                         >
                           {generationProgress.streamedCode || 'Starting code generation...'}
                         </SyntaxHighlighter>
-                        <span className="inline-block w-3 h-5 bg-orange-400 ml-1 animate-pulse" />
+                        <span className="inline-block w-3 h-5 bg-kiln-iris-400 ml-1 animate-pulse" />
                       </div>
                     </div>
                   )
@@ -1451,7 +1452,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
                           >
                             {generationProgress.currentFile.content}
                           </SyntaxHighlighter>
-                          <span className="inline-block w-3 h-4 bg-orange-400 ml-4 mb-4 animate-pulse" />
+                          <span className="inline-block w-3 h-4 bg-kiln-iris-400 ml-4 mb-4 animate-pulse" />
                         </div>
                       </div>
                     )}
@@ -1546,7 +1547,7 @@ Tip: I automatically detect and install npm packages from your code imports (lik
               <div className="mx-6 mb-6">
                 <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-300"
+                    className="h-full bg-gradient-to-r from-kiln-iris-500 to-kiln-iris-400 transition-all duration-300"
                     style={{
                       width: `${(generationProgress.currentComponent / Math.max(generationProgress.components.length, 1)) * 100}%`
                     }}
@@ -3348,12 +3349,25 @@ Focus on the key sections and content, making it clean and modern.`;
   return (
     <HeaderProvider>
       <div className="font-sans bg-background text-foreground h-screen flex flex-col">
-      <div className="bg-white py-[15px] py-[8px] border-b border-border-faint flex items-center justify-between shadow-sm">
-        <HeaderBrandKit />
-        <div className="flex items-center gap-2">
+      {/* Studio chrome. Dark, so the generated preview below is the brightest
+          thing on screen and the tool furniture recedes. */}
+      <div className="bg-kiln-obsidian px-16 h-56 border-b border-white/8 flex items-center justify-between gap-16">
+        <div className="flex items-center gap-20">
+          <span className="text-white">
+            <KilnLogo markClassName="w-22 h-22" variant={generationProgress.isGenerating ? 'firing' : 'gradient'} />
+          </span>
+          <Link
+            href="/create"
+            className="hidden sm:inline-flex items-center gap-6 h-30 px-12 rounded-full border border-white/12 text-[13px] text-white/60 hover:text-white hover:border-white/25 transition-colors"
+          >
+            + New app
+          </Link>
+        </div>
+        <div className="flex items-center gap-8">
           {/* Model Selector - Left side */}
           <select
             value={aiModel}
+            aria-label="Model"
             onChange={(e) => {
               const newModel = e.target.value;
               setAiModel(newModel);
@@ -3364,17 +3378,17 @@ Focus on the key sections and content, making it clean and modern.`;
               }
               router.push(`/generation?${params.toString()}`);
             }}
-            className="px-3 py-1.5 text-sm text-gray-900 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-300 transition-colors"
+            className="h-32 px-10 text-[13px] text-white/80 bg-white/[0.06] border border-white/10 rounded-8 focus:outline-none focus:border-kiln-iris-400/60 transition-colors"
           >
             {appConfig.ai.availableModels.map(model => (
-              <option key={model} value={model}>
+              <option key={model} value={model} className="bg-kiln-ink-800 text-white">
                 {appConfig.ai.modelDisplayNames?.[model] || model}
               </option>
             ))}
           </select>
           <button 
             onClick={() => createSandbox()}
-            className="p-8 rounded-lg transition-colors bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100"
+            className="w-32 h-32 grid place-items-center rounded-8 transition-colors bg-white/[0.06] border border-white/10 text-white/70 hover:text-white hover:bg-white/[0.1]"
             title="Create new sandbox"
           >
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3383,7 +3397,7 @@ Focus on the key sections and content, making it clean and modern.`;
           </button>
           <button 
             onClick={reapplyLastGeneration}
-            className="p-8 rounded-lg transition-colors bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-32 h-32 grid place-items-center rounded-8 transition-colors bg-white/[0.06] border border-white/10 text-white/70 hover:text-white hover:bg-white/[0.1] disabled:opacity-35 disabled:cursor-not-allowed"
             title="Re-apply last generation"
             disabled={!conversationContext.lastGeneratedCode || !sandboxData}
           >
@@ -3394,7 +3408,7 @@ Focus on the key sections and content, making it clean and modern.`;
           <button 
             onClick={downloadZip}
             disabled={!sandboxData}
-            className="p-8 rounded-lg transition-colors bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-32 h-32 grid place-items-center rounded-8 transition-colors bg-white/[0.06] border border-white/10 text-white/70 hover:text-white hover:bg-white/[0.1] disabled:opacity-35 disabled:cursor-not-allowed"
             title="Download your Vite app as ZIP"
           >
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3904,7 +3918,7 @@ Focus on the key sections and content, making it clean and modern.`;
                           return startIndex !== -1 ? lastContent.slice(startIndex) : lastContent;
                         })()}
                       </SyntaxHighlighter>
-                      <span className="inline-block w-3 h-4 bg-orange-400 ml-3 mb-3 animate-pulse" />
+                      <span className="inline-block w-3 h-4 bg-kiln-iris-400 ml-3 mb-3 animate-pulse" />
                     </div>
                   </motion.div>
                 )}

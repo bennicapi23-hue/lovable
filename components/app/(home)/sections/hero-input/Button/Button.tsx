@@ -1,12 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
 
 import AnimatedWidth from "@/components/shared/layout/animated-width";
-import ArrowRight from "@/components/app/(home)/sections/hero-input/_svg/ArrowRight";
+import { ArrowRight } from "lucide-react";
 import Button from "@/components/shared/button/Button";
 
 export default function HeroInputSubmitButton({
   dirty,
-  buttonText = "Re-imagine Site",
+  buttonText = "Rebuild site",
   disabled = false,
 }: {
   dirty: boolean;
@@ -34,7 +34,7 @@ export default function HeroInputSubmitButton({
               </div>
             ) : (
               <div className="w-60 py-8 flex-center">
-                <ArrowRight />
+                <ArrowRight className="w-16 h-16 text-white" aria-hidden />
               </div>
             )}
           </motion.div>

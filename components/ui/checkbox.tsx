@@ -36,7 +36,7 @@ const Checkbox = React.forwardRef<HTMLDivElement, CheckboxProps>(
             "h-4 w-4 rounded border border-zinc-300 flex items-center justify-center transition-all duration-200",
             "[box-shadow:inset_0px_-1px_0px_0px_#e4e4e7,_0px_1px_3px_0px_rgba(228,_228,_231,_20%)]",
             !disabled && "hover:[box-shadow:inset_0px_-1px_0px_0px_#d4d4d8,_0px_1px_3px_0px_rgba(212,_212,_216,_30%)]",
-            checked && "bg-orange-500 border-orange-500 [box-shadow:inset_0px_-1px_0px_0px_#c2410c,_0px_1px_3px_0px_rgba(234,_88,_12,_30%)]",
+            checked && "bg-kiln-iris-500 border-kiln-iris-500 [box-shadow:inset_0px_-1px_0px_0px_#3f2ab0,_0px_1px_3px_0px_rgba(98,_68,_245,_30%)]",
             disabled && "opacity-50 cursor-not-allowed"
           )}
         >

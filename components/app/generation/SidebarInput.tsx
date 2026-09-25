@@ -54,13 +54,25 @@ export default function SidebarInput({ onSubmit, disabled = false }: SidebarInpu
   return (
     <div className="w-full">
       <div >
-        <div className="p-4 border-b border-gray-100">
-         {/* link to home page with button */}
-         <Link href="/">
-          <button className="w-full px-3 py-2 text-xs font-medium text-gray-700 bg-white rounded border border-gray-200 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500">
-            Generate a new website
-          </button>
-         </Link>
+        <div className="p-4 border-b border-gray-100 space-y-2">
+          {/* Both ways in, so building from a description is discoverable
+              from inside the studio and not only from the landing page. */}
+          <Link href="/create" className="block">
+            <button
+              type="button"
+              className="w-full px-3 py-2 text-xs font-medium text-white bg-kiln-iris-500 rounded-lg hover:bg-kiln-iris-400 focus:outline-none focus:ring-2 focus:ring-kiln-iris-400/40 transition-colors"
+            >
+              Describe an app
+            </button>
+          </Link>
+          <Link href="/" className="block">
+            <button
+              type="button"
+              className="w-full px-3 py-2 text-xs font-medium text-gray-700 bg-white rounded-lg border border-gray-200 hover:border-gray-300 focus:border-kiln-iris-400 focus:outline-none focus:ring-2 focus:ring-kiln-iris-400/25 transition-colors"
+            >
+              Rebuild a site
+            </button>
+          </Link>
         </div>
 
         {/* Options Section - Show when valid URL */}
@@ -78,7 +90,7 @@ export default function SidebarInput({ onSubmit, disabled = false }: SidebarInpu
                     className={`
                       py-2 px-2 rounded text-xs font-medium border transition-all text-center
                       ${selectedStyle === style.id
-                        ? 'border-orange-500 bg-orange-50 text-orange-900'
+                        ? 'border-kiln-iris-400 bg-kiln-iris-50 text-kiln-iris-800'
                         : 'border-gray-200 hover:border-gray-300 bg-white text-gray-700'
                       }
                       ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
@@ -97,7 +109,7 @@ export default function SidebarInput({ onSubmit, disabled = false }: SidebarInpu
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
                 disabled={disabled}
-                className="w-full px-3 py-2 text-xs font-medium text-gray-700 bg-white rounded border border-gray-200 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                className="w-full px-3 py-2 text-xs font-medium text-gray-700 bg-white rounded border border-gray-200 focus:border-kiln-iris-400 focus:outline-none focus:ring-1 focus:ring-kiln-iris-400"
               >
                 {models.map((model) => (
                   <option key={model.id} value={model.id}>
@@ -115,7 +127,7 @@ export default function SidebarInput({ onSubmit, disabled = false }: SidebarInpu
                 value={additionalInstructions}
                 onChange={(e) => setAdditionalInstructions(e.target.value)}
                 disabled={disabled}
-                className="w-full px-3 py-2 text-xs text-gray-700 bg-gray-50 rounded border border-gray-200 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500 placeholder:text-gray-400"
+                className="w-full px-3 py-2 text-xs text-gray-700 bg-gray-50 rounded border border-gray-200 focus:border-kiln-iris-400 focus:outline-none focus:ring-1 focus:ring-kiln-iris-400 placeholder:text-gray-400"
                 placeholder="e.g., make it more colorful, add animations..."
               />
             </div>
@@ -128,7 +140,7 @@ export default function SidebarInput({ onSubmit, disabled = false }: SidebarInpu
                 className={`
                   w-full py-2.5 px-4 rounded-lg text-sm font-medium transition-all
                   ${isValidUrl && !disabled
-                    ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                    ? 'bg-kiln-iris-500 hover:bg-kiln-iris-600 text-white'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                   }
                 `}
