@@ -1,4 +1,5 @@
-import { FileManifest, EditType, EditIntent, IntentPattern } from '@/types/file-manifest';
+import { EditType } from '@/types/file-manifest';
+import type { FileManifest, EditIntent, IntentPattern } from '@/types/file-manifest';
 
 /**
  * Analyze user prompts to determine edit intent and select relevant files

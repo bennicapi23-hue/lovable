@@ -1,4 +1,4 @@
-import { FileInfo, ImportInfo, ComponentInfo } from '@/types/file-manifest';
+import type { FileInfo, ImportInfo, ComponentInfo } from '@/types/file-manifest';
 
 /**
  * Parse a JavaScript/JSX file to extract imports, exports, and component info

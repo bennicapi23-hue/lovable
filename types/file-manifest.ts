@@ -50,16 +50,29 @@ export interface FileManifest {
   timestamp: number;
 }
 
-// Edit classification types
-export enum EditType {
-  UPDATE_COMPONENT = 'UPDATE_COMPONENT',    // "update the header", "change button color"
-  ADD_FEATURE = 'ADD_FEATURE',              // "add a videos page", "create new component"
-  FIX_ISSUE = 'FIX_ISSUE',                 // "fix the styling", "resolve error"
-  REFACTOR = 'REFACTOR',                   // "reorganize", "clean up"
-  FULL_REBUILD = 'FULL_REBUILD',           // "start over", "recreate everything"
-  UPDATE_STYLE = 'UPDATE_STYLE',           // "change colors", "update theme"
-  ADD_DEPENDENCY = 'ADD_DEPENDENCY'        // "install package", "add library"
-}
+/**
+ * Edit classification.
+ *
+ * A const object rather than an `enum`: an enum emits runtime code, which
+ * means it cannot be type-stripped and the modules that import it cannot be
+ * unit tested without a build step. This form is also the one current
+ * TypeScript guidance prefers — it tree-shakes, and it has none of the
+ * reverse-mapping surprises enums carry.
+ *
+ * `EditType.UPDATE_COMPONENT` and the `EditType` type both still work, so
+ * every existing call site is unaffected.
+ */
+export const EditType = {
+  UPDATE_COMPONENT: 'UPDATE_COMPONENT',   // "update the header", "change button color"
+  ADD_FEATURE: 'ADD_FEATURE',             // "add a videos page", "create new component"
+  FIX_ISSUE: 'FIX_ISSUE',                 // "fix the styling", "resolve error"
+  REFACTOR: 'REFACTOR',                   // "reorganize", "clean up"
+  FULL_REBUILD: 'FULL_REBUILD',           // "start over", "recreate everything"
+  UPDATE_STYLE: 'UPDATE_STYLE',           // "change colors", "update theme"
+  ADD_DEPENDENCY: 'ADD_DEPENDENCY',       // "install package", "add library"
+} as const;
+
+export type EditType = (typeof EditType)[keyof typeof EditType];
 
 export interface EditIntent {
   type: EditType;
