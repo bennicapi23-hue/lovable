@@ -1,12 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var activeSandbox: any;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
-    if (!global.activeSandbox) {
+    if (!session.sandbox) {
       return NextResponse.json({ 
         success: false, 
         error: 'No active sandbox' 
@@ -16,7 +22,7 @@ export async function GET() {
     console.log('[sandbox-logs] Fetching Vite dev server logs...');
     
     // Check if Vite processes are running
-    const psResult = await global.activeSandbox.runCommand({
+    const psResult = await session.sandbox.runCommand({
       cmd: 'ps',
       args: ['aux']
     });
@@ -43,7 +49,7 @@ export async function GET() {
     
     // Try to read any recent log files
     try {
-      const findResult = await global.activeSandbox.runCommand({
+      const findResult = await session.sandbox.runCommand({
         cmd: 'find',
         args: ['/tmp', '-name', '*vite*', '-name', '*.log', '-type', 'f']
       });
@@ -53,7 +59,7 @@ export async function GET() {
         
         for (const logFile of logFiles.slice(0, 2)) {
           try {
-            const catResult = await global.activeSandbox.runCommand({
+            const catResult = await session.sandbox.runCommand({
               cmd: 'tail',
               args: ['-n', '10', logFile]
             });

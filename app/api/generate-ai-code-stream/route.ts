@@ -11,6 +11,12 @@ import { FileManifest } from '@/types/file-manifest';
 import type { ConversationState, ConversationMessage, ConversationEdit } from '@/types/conversation';
 import { appConfig } from '@/config/app.config';
 import { GREENFIELD_SYSTEM_RULES } from '@/lib/app-builder/build-prompt';
+import {
+  currentSession,
+  getConversation,
+  newConversation,
+  setConversation,
+} from '@/lib/sandbox/session-store';
 import { resolveUsableModel } from '@/lib/ai/provider-manager';
 import { recordUsage } from '@/lib/billing/entitlements';
 import { authorizeAction } from '@/lib/billing/session';
@@ -88,10 +94,11 @@ function analyzeUserPreferences(messages: ConversationMessage[]): {
   };
 }
 
-declare global {
-  var sandboxState: SandboxState;
-  var conversationState: ConversationState | null;
-}
+/**
+ * The conversation is per account (see lib/sandbox/session-store). It used to
+ * be a process global, so two people sharing an instance fed each other's
+ * messages into their own generations as context.
+ */
 
 export async function POST(request: NextRequest) {
   try {
@@ -153,19 +160,16 @@ export async function POST(request: NextRequest) {
     console.log('[generate-ai-code-stream] - currentFiles count:', context?.currentFiles ? Object.keys(context.currentFiles).length : 0);
     
     // Initialize conversation state if not exists
-    if (!global.conversationState) {
-      global.conversationState = {
-        conversationId: `conv-${Date.now()}`,
-        startedAt: Date.now(),
-        lastUpdated: Date.now(),
-        context: {
-          messages: [],
-          edits: [],
-          projectEvolution: { majorChanges: [] },
-          userPreferences: {}
-        }
-      };
+    let conversationState = getConversation(account.id);
+    if (!conversationState) {
+      conversationState = newConversation();
+      setConversation(account.id, conversationState);
     }
+
+    // The sandbox this account is currently building in, if any. Null is a
+    // normal state: a fresh build generates code before a sandbox exists.
+    const buildSession = currentSession(account.id);
+    let sandboxState = buildSession?.state;
     
     // Add user message to conversation history
     const userMessage: ConversationMessage = {
@@ -177,18 +181,18 @@ export async function POST(request: NextRequest) {
         sandboxId: context?.sandboxId
       }
     };
-    global.conversationState.context.messages.push(userMessage);
+    conversationState.context.messages.push(userMessage);
     
     // Clean up old messages to prevent unbounded growth
-    if (global.conversationState.context.messages.length > 20) {
+    if (conversationState.context.messages.length > 20) {
       // Keep only the last 15 messages
-      global.conversationState.context.messages = global.conversationState.context.messages.slice(-15);
+      conversationState.context.messages = conversationState.context.messages.slice(-15);
       console.log('[generate-ai-code-stream] Trimmed conversation history to prevent context overflow');
     }
     
     // Clean up old edits
-    if (global.conversationState.context.edits.length > 10) {
-      global.conversationState.context.edits = global.conversationState.context.edits.slice(-8);
+    if (conversationState.context.edits.length > 10) {
+      conversationState.context.edits = conversationState.context.edits.slice(-8);
     }
     
     // Debug: Show a sample of actual file content
@@ -239,15 +243,15 @@ export async function POST(request: NextRequest) {
         
         if (isEdit) {
           console.log('[generate-ai-code-stream] Edit mode detected - starting agentic search workflow');
-          console.log('[generate-ai-code-stream] Has fileCache:', !!global.sandboxState?.fileCache);
-          console.log('[generate-ai-code-stream] Has manifest:', !!global.sandboxState?.fileCache?.manifest);
+          console.log('[generate-ai-code-stream] Has fileCache:', !!sandboxState?.fileCache);
+          console.log('[generate-ai-code-stream] Has manifest:', !!sandboxState?.fileCache?.manifest);
           
-          const manifest: FileManifest | undefined = global.sandboxState?.fileCache?.manifest;
+          const manifest: FileManifest | undefined = sandboxState?.fileCache?.manifest;
           
           if (manifest) {
             await sendProgress({ type: 'status', message: '🔍 Creating search plan...' });
             
-            const fileContents = global.sandboxState.fileCache?.files || {};
+            const fileContents = sandboxState?.fileCache?.files || {};
             console.log('[generate-ai-code-stream] Files available for search:', Object.keys(fileContents).length);
             
             // STEP 1: Get search plan from AI
@@ -378,7 +382,7 @@ User request: "${prompt}"`;
             console.log('[generate-ai-code-stream] WARNING: No manifest available for edit mode!');
             
             // Try to fetch files from sandbox if we have one
-            if (global.activeSandbox) {
+            if (buildSession?.sandbox) {
               await sendProgress({ type: 'status', message: 'Fetching current files from sandbox...' });
               
               try {
@@ -559,15 +563,15 @@ Remember: You are a SURGEON making a precise incision, not an artist repainting 
         
         // Build conversation context for system prompt
         let conversationContext = '';
-        if (global.conversationState && global.conversationState.context.messages.length > 1) {
+        if (conversationState && conversationState.context.messages.length > 1) {
           console.log('[generate-ai-code-stream] Building conversation context');
-          console.log('[generate-ai-code-stream] Total messages:', global.conversationState.context.messages.length);
-          console.log('[generate-ai-code-stream] Total edits:', global.conversationState.context.edits.length);
+          console.log('[generate-ai-code-stream] Total messages:', conversationState.context.messages.length);
+          console.log('[generate-ai-code-stream] Total edits:', conversationState.context.edits.length);
           
           conversationContext = `\n\n## Conversation History (Recent)\n`;
           
           // Include only the last 3 edits to save context
-          const recentEdits = global.conversationState.context.edits.slice(-3);
+          const recentEdits = conversationState.context.edits.slice(-3);
           if (recentEdits.length > 0) {
             console.log('[generate-ai-code-stream] Including', recentEdits.length, 'recent edits in context');
             conversationContext += `\n### Recent Edits:\n`;
@@ -577,7 +581,7 @@ Remember: You are a SURGEON making a precise incision, not an artist repainting 
           }
           
           // Include recently created files - CRITICAL for preventing duplicates
-          const recentMsgs = global.conversationState.context.messages.slice(-5);
+          const recentMsgs = conversationState.context.messages.slice(-5);
           const recentlyCreatedFiles: string[] = [];
           recentMsgs.forEach(msg => {
             if (msg.metadata?.editedFiles) {
@@ -607,7 +611,7 @@ Remember: You are a SURGEON making a precise incision, not an artist repainting 
           }
           
           // Include only last 2 major changes
-          const majorChanges = global.conversationState.context.projectEvolution.majorChanges.slice(-2);
+          const majorChanges = conversationState.context.projectEvolution.majorChanges.slice(-2);
           if (majorChanges.length > 0) {
             conversationContext += `\n### Recent Changes:\n`;
             majorChanges.forEach(change => {
@@ -616,7 +620,7 @@ Remember: You are a SURGEON making a precise incision, not an artist repainting 
           }
           
           // Keep user preferences - they're concise
-          const userPrefs = analyzeUserPreferences(global.conversationState.context.messages);
+          const userPrefs = analyzeUserPreferences(conversationState.context.messages);
           if (userPrefs.commonPatterns.length > 0) {
             conversationContext += `\n### User Preferences:\n`;
             conversationContext += `- Edit style: ${userPrefs.preferredEditStyle}\n`;
@@ -1019,17 +1023,17 @@ MORPH FAST APPLY MODE (EDIT-ONLY):
           }
           
           // Use backend file cache instead of frontend-provided files
-          let backendFiles = global.sandboxState?.fileCache?.files || {};
+          let backendFiles = sandboxState?.fileCache?.files || {};
           let hasBackendFiles = Object.keys(backendFiles).length > 0;
           
           console.log('[generate-ai-code-stream] Backend file cache status:');
-          console.log('[generate-ai-code-stream] - Has sandboxState:', !!global.sandboxState);
-          console.log('[generate-ai-code-stream] - Has fileCache:', !!global.sandboxState?.fileCache);
+          console.log('[generate-ai-code-stream] - Has sandboxState:', !!sandboxState);
+          console.log('[generate-ai-code-stream] - Has fileCache:', !!sandboxState?.fileCache);
           console.log('[generate-ai-code-stream] - File count:', Object.keys(backendFiles).length);
-          console.log('[generate-ai-code-stream] - Has manifest:', !!global.sandboxState?.fileCache?.manifest);
+          console.log('[generate-ai-code-stream] - Has manifest:', !!sandboxState?.fileCache?.manifest);
           
           // If no backend files and we're in edit mode, try to fetch from sandbox
-          if (!hasBackendFiles && isEdit && (global.activeSandbox || context?.sandboxId)) {
+          if (!hasBackendFiles && isEdit && (buildSession?.sandbox || context?.sandboxId)) {
             console.log('[generate-ai-code-stream] No backend files, attempting to fetch from sandbox...');
             
             try {
@@ -1044,16 +1048,18 @@ MORPH FAST APPLY MODE (EDIT-ONLY):
                   console.log('[generate-ai-code-stream] Successfully fetched', Object.keys(filesData.files).length, 'files from sandbox');
                   
                   // Initialize sandboxState if needed
-                  if (!global.sandboxState) {
-                    global.sandboxState = {
+                  if (!sandboxState) {
+                    sandboxState = {
                       fileCache: {
                         files: {},
                         lastSync: Date.now(),
                         sandboxId: context?.sandboxId || 'unknown'
                       }
                     } as any;
-                  } else if (!global.sandboxState.fileCache) {
-                    global.sandboxState.fileCache = {
+                    // Write it back so later requests see the cache too.
+                    if (buildSession) buildSession.state = sandboxState!;
+                  } else if (!sandboxState.fileCache) {
+                    sandboxState.fileCache = {
                       files: {},
                       lastSync: Date.now(),
                       sandboxId: context?.sandboxId || 'unknown'
@@ -1063,16 +1069,16 @@ MORPH FAST APPLY MODE (EDIT-ONLY):
                   // Store files in cache
                   for (const [path, content] of Object.entries(filesData.files)) {
                     const normalizedPath = path.replace('/home/user/app/', '');
-                    if (global.sandboxState.fileCache) {
-                      global.sandboxState.fileCache.files[normalizedPath] = {
+                    if (sandboxState?.fileCache) {
+                      sandboxState.fileCache.files[normalizedPath] = {
                         content: content as string,
                         lastModified: Date.now()
                       };
                     }
                   }
                   
-                  if (filesData.manifest && global.sandboxState.fileCache) {
-                    global.sandboxState.fileCache.manifest = filesData.manifest;
+                  if (filesData.manifest && sandboxState?.fileCache) {
+                    sandboxState.fileCache.manifest = filesData.manifest;
                     
                     // Now try to analyze edit intent with the fetched manifest
                     if (!editContext) {
@@ -1103,7 +1109,7 @@ MORPH FAST APPLY MODE (EDIT-ONLY):
                   }
                   
                   // Update variables
-                  backendFiles = global.sandboxState.fileCache?.files || {};
+                  backendFiles = sandboxState?.fileCache?.files || {};
                   hasBackendFiles = Object.keys(backendFiles).length > 0;
                   console.log('[generate-ai-code-stream] Updated backend cache with fetched files');
                 }
@@ -1121,8 +1127,8 @@ MORPH FAST APPLY MODE (EDIT-ONLY):
               contextParts.push(`\n${editContext.systemPrompt || enhancedSystemPrompt}\n`);
               
               // Get contents of primary and context files
-              const primaryFileContents = await getFileContents(editContext.primaryFiles, global.sandboxState!.fileCache!.manifest!);
-              const contextFileContents = await getFileContents(editContext.contextFiles, global.sandboxState!.fileCache!.manifest!);
+              const primaryFileContents = await getFileContents(editContext.primaryFiles, sandboxState!.fileCache!.manifest!);
+              const contextFileContents = await getFileContents(editContext.contextFiles, sandboxState!.fileCache!.manifest!);
               
               // Format files for AI
               const formattedFiles = formatFilesForAI(primaryFileContents, contextFileContents);
@@ -1886,7 +1892,7 @@ Provide the complete file content without any truncation. Include all necessary 
         });
         
         // Track edit in conversation history
-        if (isEdit && editContext && global.conversationState) {
+        if (isEdit && editContext && conversationState) {
           const editRecord: ConversationEdit = {
             timestamp: Date.now(),
             userRequest: prompt,
@@ -1896,11 +1902,11 @@ Provide the complete file content without any truncation. Include all necessary 
             outcome: 'success' // Assuming success if we got here
           };
           
-          global.conversationState.context.edits.push(editRecord);
+          conversationState.context.edits.push(editRecord);
           
           // Track major changes
           if (editContext.editIntent.type === 'ADD_FEATURE' || files.length > 3) {
-            global.conversationState.context.projectEvolution.majorChanges.push({
+            conversationState.context.projectEvolution.majorChanges.push({
               timestamp: Date.now(),
               description: editContext.editIntent.description,
               filesAffected: editContext.primaryFiles
@@ -1908,7 +1914,7 @@ Provide the complete file content without any truncation. Include all necessary 
           }
           
           // Update last updated timestamp
-          global.conversationState.lastUpdated = Date.now();
+          conversationState.lastUpdated = Date.now();
           
           console.log('[generate-ai-code-stream] Updated conversation history with edit:', editRecord);
         }

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var activeSandbox: any;
 }
 
 export async function POST(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     const { files } = await request.json();
     
@@ -15,7 +21,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!global.activeSandbox) {
+    if (!session.sandbox) {
       return NextResponse.json({
         success: false,
         error: 'No active sandbox'
@@ -98,7 +104,7 @@ export async function POST(request: NextRequest) {
     
     for (const packageName of uniquePackages) {
       try {
-        const checkResult = await global.activeSandbox.runCommand({
+        const checkResult = await session.sandbox.runCommand({
           cmd: 'test',
           args: ['-d', `node_modules/${packageName}`]
         });
@@ -129,7 +135,7 @@ export async function POST(request: NextRequest) {
     // Install missing packages
     console.log('[detect-and-install-packages] Installing packages:', missing);
     
-    const installResult = await global.activeSandbox.runCommand({
+    const installResult = await session.sandbox.runCommand({
       cmd: 'npm',
       args: ['install', '--save', ...missing]
     });
@@ -148,7 +154,7 @@ export async function POST(request: NextRequest) {
 
     for (const packageName of missing) {
       try {
-        const verifyResult = await global.activeSandbox.runCommand({
+        const verifyResult = await session.sandbox.runCommand({
           cmd: 'test',
           args: ['-d', `node_modules/${packageName}`]
         });

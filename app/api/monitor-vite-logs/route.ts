@@ -1,12 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var activeSandbox: any;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
-    if (!global.activeSandbox) {
+    if (!session.sandbox) {
       return NextResponse.json({ 
         success: false, 
         error: 'No active sandbox' 
@@ -19,7 +25,7 @@ export async function GET() {
     
     // Check if there's an error file from previous runs
     try {
-      const catResult = await global.activeSandbox.runCommand({
+      const catResult = await session.sandbox.runCommand({
         cmd: 'cat',
         args: ['/tmp/vite-errors.json']
       });
@@ -35,7 +41,7 @@ export async function GET() {
     
     // Look for any Vite-related log files that might contain errors
     try {
-      const findResult = await global.activeSandbox.runCommand({
+      const findResult = await session.sandbox.runCommand({
         cmd: 'find',
         args: ['/tmp', '-name', '*vite*', '-type', 'f']
       });
@@ -45,7 +51,7 @@ export async function GET() {
         
         for (const logFile of logFiles.slice(0, 3)) {
           try {
-            const grepResult = await global.activeSandbox.runCommand({
+            const grepResult = await session.sandbox.runCommand({
               cmd: 'grep',
               args: ['-i', 'failed to resolve import', logFile]
             });

@@ -1,103 +1,105 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { SandboxFactory } from '@/lib/sandbox/factory';
-// SandboxProvider type is used through SandboxFactory
-import type { SandboxState } from '@/types/sandbox';
 import { sandboxManager } from '@/lib/sandbox/sandbox-manager';
+import { resolveAccount } from '@/lib/billing/session';
+import { getPlan } from '@/config/plans.config';
+import { closeAllSessions, countSessions, openSession } from '@/lib/sandbox/session-store';
 
-// Store active sandbox globally
-declare global {
-  var activeSandboxProvider: any;
-  var sandboxData: any;
-  var existingFiles: Set<string>;
-  var sandboxState: SandboxState;
-}
+/**
+ * Creates a sandbox through the provider abstraction.
+ *
+ * This route previously began by calling `sandboxManager.terminateAll()`,
+ * which stopped every sandbox in the process — so one person starting a build
+ * killed everyone else's running preview. It now stops only the sandboxes the
+ * calling account owns.
+ */
+export async function POST(request: NextRequest) {
+  const account = await resolveAccount(request);
+  if (!account) {
+    return NextResponse.json({ error: 'Sign in to start a sandbox.' }, { status: 401 });
+  }
 
-export async function POST() {
+  const plan = getPlan(account.planId);
+  const limit = plan.limits.concurrentSandboxes;
+
   try {
     console.log('[create-ai-sandbox-v2] Creating sandbox...');
-    
-    // Clean up all existing sandboxes
-    console.log('[create-ai-sandbox-v2] Cleaning up existing sandboxes...');
-    await sandboxManager.terminateAll();
-    
-    // Also clean up legacy global state
-    if (global.activeSandboxProvider) {
+
+    // Retire this account's own sandboxes, and nobody else's.
+    for (const stale of closeAllSessions(account.id)) {
+      if (!stale.provider) continue;
       try {
-        await global.activeSandboxProvider.terminate();
+        await stale.provider.terminate();
       } catch (e) {
-        console.error('Failed to terminate legacy global sandbox:', e);
+        console.error('[create-ai-sandbox-v2] failed to stop a previous sandbox:', e);
       }
-      global.activeSandboxProvider = null;
-    }
-    
-    // Clear existing files tracking
-    if (global.existingFiles) {
-      global.existingFiles.clear();
-    } else {
-      global.existingFiles = new Set<string>();
+      await sandboxManager.terminateSandbox(stale.id).catch(() => {});
     }
 
-    // Create new sandbox using factory
+    if (Number.isFinite(limit) && countSessions(account.id) >= limit) {
+      return NextResponse.json(
+        {
+          error:
+            `The ${plan.name} plan allows ${limit} sandbox${limit === 1 ? '' : 'es'} at once. ` +
+            'Close one, or upgrade for more.',
+          upgrade: '/pricing',
+        },
+        { status: 409 },
+      );
+    }
+
     const provider = SandboxFactory.create();
     const sandboxInfo = await provider.createSandbox();
-    
+
     console.log('[create-ai-sandbox-v2] Setting up Vite React app...');
     await provider.setupViteApp();
-    
-    // Register with sandbox manager
+
     sandboxManager.registerSandbox(sandboxInfo.sandboxId, provider);
-    
-    // Also store in legacy global state for backward compatibility
-    global.activeSandboxProvider = provider;
-    global.sandboxData = {
-      sandboxId: sandboxInfo.sandboxId,
-      url: sandboxInfo.url
-    };
-    
-    // Initialize sandbox state
-    global.sandboxState = {
+
+    const session = openSession({ accountId: account.id, sandboxId: sandboxInfo.sandboxId });
+    session.provider = provider;
+    session.sandbox = provider;
+    session.data = { sandboxId: sandboxInfo.sandboxId, url: sandboxInfo.url };
+    session.state = {
       fileCache: {
         files: {},
         lastSync: Date.now(),
-        sandboxId: sandboxInfo.sandboxId
+        sandboxId: sandboxInfo.sandboxId,
       },
-      sandbox: provider, // Store the provider instead of raw sandbox
+      sandbox: provider,
       sandboxData: {
         sandboxId: sandboxInfo.sandboxId,
-        url: sandboxInfo.url
-      }
+        url: sandboxInfo.url,
+      },
     };
-    
+
     console.log('[create-ai-sandbox-v2] Sandbox ready at:', sandboxInfo.url);
-    
+
     return NextResponse.json({
       success: true,
       sandboxId: sandboxInfo.sandboxId,
       url: sandboxInfo.url,
       provider: sandboxInfo.provider,
-      message: 'Sandbox created and Vite React app initialized'
+      message: 'Sandbox created and Vite React app initialized',
     });
-
   } catch (error) {
     console.error('[create-ai-sandbox-v2] Error:', error);
-    
-    // Clean up on error
-    await sandboxManager.terminateAll();
-    if (global.activeSandboxProvider) {
+
+    // Clean up only what this account owns.
+    for (const stale of closeAllSessions(account.id)) {
       try {
-        await global.activeSandboxProvider.terminate();
+        await stale.provider?.terminate();
       } catch (e) {
-        console.error('Failed to terminate sandbox on error:', e);
+        console.error('[create-ai-sandbox-v2] cleanup failed:', e);
       }
-      global.activeSandboxProvider = null;
     }
-    
+
     return NextResponse.json(
-      { 
+      {
         error: error instanceof Error ? error.message : 'Failed to create sandbox',
-        details: error instanceof Error ? error.stack : undefined
+        details: error instanceof Error ? error.stack : undefined,
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

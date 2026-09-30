@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 // Get active sandbox from global state (in production, use a proper state management solution)
 declare global {
@@ -6,6 +7,11 @@ declare global {
 }
 
 export async function POST(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     const { command } = await request.json();
     
@@ -16,7 +22,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    if (!global.activeSandbox) {
+    if (!session.sandbox) {
       return NextResponse.json({ 
         success: false, 
         error: 'No active sandbox' 
@@ -31,7 +37,7 @@ export async function POST(request: NextRequest) {
     const args = commandParts.slice(1);
     
     // Execute command using Vercel Sandbox
-    const result = await global.activeSandbox.runCommand({
+    const result = await session.sandbox.runCommand({
       cmd,
       args
     });

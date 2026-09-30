@@ -1,89 +1,102 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { Sandbox } from '@vercel/sandbox';
-import type { SandboxState } from '@/types/sandbox';
 import { appConfig } from '@/config/app.config';
+import { resolveAccount } from '@/lib/billing/session';
+import { getPlan } from '@/config/plans.config';
+import {
+  closeAllSessions,
+  countSessions,
+  currentSession,
+  openSession,
+} from '@/lib/sandbox/session-store';
 
-// Store active sandbox globally
-declare global {
-  var activeSandbox: any;
-  var sandboxData: any;
-  var existingFiles: Set<string>;
-  var sandboxState: SandboxState;
-  var sandboxCreationInProgress: boolean;
-  var sandboxCreationPromise: Promise<any> | null;
-}
+/**
+ * In-flight creations, per account.
+ *
+ * Two clicks on "new sandbox" used to share one process-wide promise, so a
+ * second account could be handed the first account's sandbox. Keying the
+ * promise by account keeps the de-duplication without the leak.
+ */
+const creating = new Map<string, Promise<any>>();
 
-export async function POST() {
-  // Check if sandbox creation is already in progress
-  if (global.sandboxCreationInProgress && global.sandboxCreationPromise) {
-    console.log('[create-ai-sandbox] Sandbox creation already in progress, waiting for existing creation...');
+export async function POST(request: NextRequest) {
+  const account = await resolveAccount(request);
+  if (!account) {
+    return NextResponse.json({ error: 'Sign in to start a sandbox.' }, { status: 401 });
+  }
+
+  // Someone already asked for this account's sandbox and it is still coming.
+  const inFlight = creating.get(account.id);
+  if (inFlight) {
+    console.log('[create-ai-sandbox] creation already in progress for this account');
     try {
-      const existingResult = await global.sandboxCreationPromise;
-      console.log('[create-ai-sandbox] Returning existing sandbox creation result');
-      return NextResponse.json(existingResult);
-    } catch (error) {
-      console.error('[create-ai-sandbox] Existing sandbox creation failed:', error);
-      // Continue with new creation if the existing one failed
+      return NextResponse.json(await inFlight);
+    } catch {
+      // That attempt failed; fall through and try again.
     }
   }
 
-  // Check if we already have an active sandbox
-  if (global.activeSandbox && global.sandboxData) {
-    console.log('[create-ai-sandbox] Returning existing active sandbox');
+  // Reuse a sandbox this account already has running.
+  const existing = currentSession(account.id);
+  if (existing?.sandbox && existing.data) {
+    console.log('[create-ai-sandbox] reusing this account running sandbox');
     return NextResponse.json({
       success: true,
-      sandboxId: global.sandboxData.sandboxId,
-      url: global.sandboxData.url
+      sandboxId: existing.data.sandboxId,
+      url: existing.data.url,
     });
   }
 
-  // Set the creation flag
-  global.sandboxCreationInProgress = true;
-  
-  // Create the promise that other requests can await
-  global.sandboxCreationPromise = createSandboxInternal();
-  
+  // Enforce the concurrency the plan advertises.
+  const plan = getPlan(account.planId);
+  const limit = plan.limits.concurrentSandboxes;
+  if (Number.isFinite(limit) && countSessions(account.id) >= limit) {
+    return NextResponse.json(
+      {
+        error:
+          `The ${plan.name} plan allows ${limit} sandbox${limit === 1 ? '' : 'es'} at once. ` +
+          'Close one, or upgrade for more.',
+        upgrade: '/pricing',
+      },
+      { status: 409 },
+    );
+  }
+
+  const promise = createSandboxInternal(account.id);
+  creating.set(account.id, promise);
+
   try {
-    const result = await global.sandboxCreationPromise;
-    return NextResponse.json(result);
+    return NextResponse.json(await promise);
   } catch (error) {
     console.error('[create-ai-sandbox] Sandbox creation failed:', error);
     return NextResponse.json(
-      { 
+      {
         error: error instanceof Error ? error.message : 'Failed to create sandbox',
         details: error instanceof Error ? error.stack : undefined
       },
       { status: 500 }
     );
   } finally {
-    global.sandboxCreationInProgress = false;
-    global.sandboxCreationPromise = null;
+    creating.delete(account.id);
   }
 }
 
-async function createSandboxInternal() {
+async function createSandboxInternal(accountId: string) {
   let sandbox: any = null;
 
   try {
     console.log('[create-ai-sandbox] Creating Vercel sandbox...');
     
-    // Kill existing sandbox if any
-    if (global.activeSandbox) {
-      console.log('[create-ai-sandbox] Stopping existing sandbox...');
+    // Stop anything this account still has running. Scoped to the account:
+    // stopping every sandbox on the process is what broke other users.
+    for (const stale of closeAllSessions(accountId)) {
+      if (!stale.sandbox) continue;
+      console.log('[create-ai-sandbox] stopping this account previous sandbox');
       try {
-        await global.activeSandbox.stop();
+        await stale.sandbox.stop();
       } catch (e) {
         console.error('Failed to stop existing sandbox:', e);
       }
-      global.activeSandbox = null;
-      global.sandboxData = null;
-    }
-    
-    // Clear existing files tracking
-    if (global.existingFiles) {
-      global.existingFiles.clear();
-    } else {
-      global.existingFiles = new Set<string>();
     }
 
     // Create Vercel sandbox with flexible authentication
@@ -314,16 +327,11 @@ body {
     // Wait for Vite to be fully ready
     await new Promise(resolve => setTimeout(resolve, appConfig.vercelSandbox.devServerStartupDelay));
 
-    // Store sandbox globally
-    global.activeSandbox = sandbox;
-    global.sandboxData = {
-      sandboxId,
-      url: sandboxUrl,
-      viteProcess
-    };
-    
-    // Initialize sandbox state
-    global.sandboxState = {
+    // Hand the sandbox to a session owned by this account.
+    const session = openSession({ accountId, sandboxId });
+    session.sandbox = sandbox;
+    session.data = { sandboxId, url: sandboxUrl };
+    session.state = {
       fileCache: {
         files: {},
         lastSync: Date.now(),
@@ -335,33 +343,29 @@ body {
         url: sandboxUrl
       }
     };
-    
-    // Track initial files
-    global.existingFiles.add('src/App.jsx');
-    global.existingFiles.add('src/main.jsx');
-    global.existingFiles.add('src/index.css');
-    global.existingFiles.add('index.html');
-    global.existingFiles.add('package.json');
-    global.existingFiles.add('vite.config.js');
-    global.existingFiles.add('tailwind.config.js');
-    global.existingFiles.add('postcss.config.js');
-    
+
+    // Files the scaffold created, so a later build knows they already exist.
+    for (const path of [
+      'src/App.jsx',
+      'src/main.jsx',
+      'src/index.css',
+      'index.html',
+      'package.json',
+      'vite.config.js',
+      'tailwind.config.js',
+      'postcss.config.js',
+    ]) {
+      session.existingFiles.add(path);
+    }
+
     console.log('[create-ai-sandbox] Sandbox ready at:', sandboxUrl);
-    
-    const result = {
+
+    return {
       success: true,
       sandboxId,
       url: sandboxUrl,
       message: 'Vercel sandbox created and Vite React app initialized'
     };
-    
-    // Store the result for reuse
-    global.sandboxData = {
-      ...global.sandboxData,
-      ...result
-    };
-    
-    return result;
 
   } catch (error) {
     console.error('[create-ai-sandbox] Error:', error);
@@ -375,10 +379,9 @@ body {
       }
     }
     
-    // Clear global state on error
-    global.activeSandbox = null;
-    global.sandboxData = null;
-    
+    // Drop the half-built session so a retry starts clean.
+    closeAllSessions(accountId);
+
     throw error; // Throw to be caught by the outer handler
   }
 }

@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { sandboxManager } from '@/lib/sandbox/sandbox-manager';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var activeSandboxProvider: any;
@@ -7,10 +8,15 @@ declare global {
   var existingFiles: Set<string>;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     // Check sandbox manager first, then fall back to global state
-    const provider = sandboxManager.getActiveProvider() || global.activeSandboxProvider;
+    const provider = sandboxManager.getActiveProvider() || session.provider;
     const sandboxExists = !!provider;
 
     let sandboxHealthy = false;
@@ -23,9 +29,9 @@ export async function GET() {
         sandboxHealthy = !!providerInfo;
         
         sandboxInfo = {
-          sandboxId: providerInfo?.sandboxId || global.sandboxData?.sandboxId,
-          url: providerInfo?.url || global.sandboxData?.url,
-          filesTracked: global.existingFiles ? Array.from(global.existingFiles) : [],
+          sandboxId: providerInfo?.sandboxId || session.data?.sandboxId,
+          url: providerInfo?.url || session.data?.url,
+          filesTracked: session.existingFiles ? Array.from(session.existingFiles) : [],
           lastHealthCheck: new Date().toISOString()
         };
       } catch (error) {

@@ -4,13 +4,8 @@ import { parseMorphEdits, applyMorphEditToFile } from '@/lib/morph-fast-apply';
 import type { SandboxState } from '@/types/sandbox';
 import type { ConversationState } from '@/types/conversation';
 import { sandboxManager } from '@/lib/sandbox/sandbox-manager';
-
-declare global {
-  var conversationState: ConversationState | null;
-  var activeSandboxProvider: any;
-  var existingFiles: Set<string>;
-  var sandboxState: SandboxState;
-}
+import { resolveAccount } from '@/lib/billing/session';
+import { currentSession, getConversation, openSession } from '@/lib/sandbox/session-store';
 
 interface ParsedResponse {
   explanation: string;
@@ -262,6 +257,14 @@ function parseAIResponse(response: string): ParsedResponse {
 }
 
 export async function POST(request: NextRequest) {
+  // Resolve the caller's build session. apply-* may legitimately run before a
+  // sandbox exists (it creates one), so a missing session is not an error here.
+  const account = await resolveAccount(request);
+  if (!account) {
+    return NextResponse.json({ success: false, error: 'Sign in first.' }, { status: 401 });
+  }
+  let session = currentSession(account.id);
+  const conversationState = getConversation(account.id);
   try {
     const { response, isEdit = false, packages = [], sandboxId } = await request.json();
 
@@ -298,8 +301,8 @@ export async function POST(request: NextRequest) {
     console.log('[apply-ai-code-stream] Packages found:', parsed.packages);
 
     // Initialize existingFiles if not already
-    if (!global.existingFiles) {
-      global.existingFiles = new Set<string>();
+    if (!session!.existingFiles) {
+      session!.existingFiles = new Set<string>();
     }
 
     // Try to get provider from sandbox manager first
@@ -307,7 +310,7 @@ export async function POST(request: NextRequest) {
 
     // Fall back to global state if not found in manager
     if (!provider) {
-      provider = global.activeSandboxProvider;
+      provider = session!.provider;
     }
 
     // If we have a sandboxId but no provider, try to get or create one
@@ -326,7 +329,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Update legacy global state
-        global.activeSandboxProvider = provider;
+        session!.provider = provider;
         console.log(`[apply-ai-code-stream] Successfully got provider for sandbox ${sandboxId}`);
       } catch (providerError) {
         console.error(`[apply-ai-code-stream] Failed to get or create provider for sandbox ${sandboxId}:`, providerError);
@@ -360,8 +363,8 @@ export async function POST(request: NextRequest) {
         sandboxManager.registerSandbox(sandboxInfo.sandboxId, provider);
 
         // Store in legacy global state
-        global.activeSandboxProvider = provider;
-        global.sandboxData = {
+        session!.provider = provider;
+        session!.data = {
           sandboxId: sandboxInfo.sandboxId,
           url: sandboxInfo.url
         };
@@ -611,7 +614,7 @@ export async function POST(request: NextRequest) {
               normalizedPath = 'src/' + normalizedPath;
             }
 
-            const isUpdate = global.existingFiles.has(normalizedPath);
+            const isUpdate = session!.existingFiles.has(normalizedPath);
 
             // Remove any CSS imports from JSX/JS files (we're using Tailwind)
             let fileContent = file.content;
@@ -638,8 +641,8 @@ export async function POST(request: NextRequest) {
             await providerInstance.writeFile(normalizedPath, fileContent);
 
             // Update file cache
-            if (global.sandboxState?.fileCache) {
-              global.sandboxState.fileCache.files[normalizedPath] = {
+            if (session!.state?.fileCache) {
+              session!.state.fileCache.files[normalizedPath] = {
                 content: fileContent,
                 lastModified: Date.now()
               };
@@ -649,7 +652,7 @@ export async function POST(request: NextRequest) {
               if (results.filesUpdated) results.filesUpdated.push(normalizedPath);
             } else {
               if (results.filesCreated) results.filesCreated.push(normalizedPath);
-              if (global.existingFiles) global.existingFiles.add(normalizedPath);
+              if (session!.existingFiles) session!.existingFiles.add(normalizedPath);
             }
 
             await sendProgress({
@@ -746,8 +749,8 @@ export async function POST(request: NextRequest) {
         });
 
         // Track applied files in conversation state
-        if (global.conversationState && results.filesCreated.length > 0) {
-          const messages = global.conversationState.context.messages;
+        if (conversationState && results.filesCreated.length > 0) {
+          const messages = conversationState.context.messages;
           if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             if (lastMessage.role === 'user') {
@@ -759,15 +762,15 @@ export async function POST(request: NextRequest) {
           }
 
           // Track applied code in project evolution
-          if (global.conversationState.context.projectEvolution) {
-            global.conversationState.context.projectEvolution.majorChanges.push({
+          if (conversationState.context.projectEvolution) {
+            conversationState.context.projectEvolution.majorChanges.push({
               timestamp: Date.now(),
               description: parsed.explanation || 'Code applied',
               filesAffected: results.filesCreated || []
             });
           }
 
-          global.conversationState.lastUpdated = Date.now();
+          conversationState.lastUpdated = Date.now();
         }
 
       } catch (error) {

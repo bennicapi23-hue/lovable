@@ -1,15 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { parseJavaScriptFile, buildComponentTree } from '@/lib/file-parser';
 import { FileManifest, FileInfo, RouteInfo } from '@/types/file-manifest';
-// SandboxState type used implicitly through global.activeSandbox
+import { requireSession } from '@/lib/sandbox/session-context';
+// SandboxState type used implicitly through session.sandbox
 
 declare global {
   var activeSandbox: any;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
-    if (!global.activeSandbox) {
+    if (!session.sandbox) {
       return NextResponse.json({
         success: false,
         error: 'No active sandbox'
@@ -19,7 +25,7 @@ export async function GET() {
     console.log('[get-sandbox-files] Fetching and analyzing file structure...');
     
     // Get list of all relevant files
-    const findResult = await global.activeSandbox.runCommand({
+    const findResult = await session.sandbox.runCommand({
       cmd: 'find',
       args: [
         '.',
@@ -53,7 +59,7 @@ export async function GET() {
     for (const filePath of fileList) {
       try {
         // Check file size first
-        const statResult = await global.activeSandbox.runCommand({
+        const statResult = await session.sandbox.runCommand({
           cmd: 'stat',
           args: ['-f', '%z', filePath]
         });
@@ -63,7 +69,7 @@ export async function GET() {
           
           // Only read files smaller than 10KB
           if (fileSize < 10000) {
-            const catResult = await global.activeSandbox.runCommand({
+            const catResult = await session.sandbox.runCommand({
               cmd: 'cat',
               args: [filePath]
             });
@@ -84,7 +90,7 @@ export async function GET() {
     }
     
     // Get directory structure
-    const treeResult = await global.activeSandbox.runCommand({
+    const treeResult = await session.sandbox.runCommand({
       cmd: 'find',
       args: ['.', '-type', 'd', '-not', '-path', '*/node_modules*', '-not', '-path', '*/.git*']
     });
@@ -150,8 +156,8 @@ export async function GET() {
     fileManifest.routes = extractRoutes(fileManifest.files);
     
     // Update global file cache with manifest
-    if (global.sandboxState?.fileCache) {
-      global.sandboxState.fileCache.manifest = fileManifest;
+    if (session.state?.fileCache) {
+      session.state.fileCache.manifest = fileManifest;
     }
 
     return NextResponse.json({

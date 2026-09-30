@@ -1,160 +1,142 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { ConversationState } from '@/types/conversation';
+import { resolveAccount } from '@/lib/billing/session';
+import {
+  clearConversation,
+  getConversation,
+  newConversation,
+  setConversation,
+} from '@/lib/sandbox/session-store';
 
-declare global {
-  var conversationState: ConversationState | null;
-}
+export const dynamic = 'force-dynamic';
 
-// GET: Retrieve current conversation state
-export async function GET() {
-  try {
-    if (!global.conversationState) {
-      return NextResponse.json({
-        success: true,
-        state: null,
-        message: 'No active conversation'
-      });
-    }
-    
-    return NextResponse.json({
-      success: true,
-      state: global.conversationState
-    });
-  } catch (error) {
-    console.error('[conversation-state] Error getting state:', error);
-    return NextResponse.json({
-      success: false,
-      error: (error as Error).message
-    }, { status: 500 });
+/**
+ * The chat transcript for the signed-in account.
+ *
+ * Previously a single process global, so two people using one instance shared
+ * one conversation — each seeing the other's messages as context for their
+ * own build. Keyed by account it is per-person, and it deliberately does not
+ * require a sandbox: the studio clears old history on mount, before anything
+ * has been built.
+ */
+
+async function accountOr401(request: NextRequest) {
+  const account = await resolveAccount(request);
+  if (!account) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: 'Sign in first.' },
+        { status: 401 },
+      ),
+    };
   }
+  return { account };
 }
 
-// POST: Reset or update conversation state
+/** GET: the current conversation, or null. */
+export async function GET(request: NextRequest) {
+  const { account, error } = await accountOr401(request);
+  if (error) return error;
+
+  const state = getConversation(account.id);
+  return NextResponse.json({
+    success: true,
+    state,
+    ...(state ? {} : { message: 'No active conversation' }),
+  });
+}
+
+/** POST: reset, trim, or update the conversation. */
 export async function POST(request: NextRequest) {
+  const { account, error } = await accountOr401(request);
+  if (error) return error;
+
   try {
     const { action, data } = await request.json();
-    
+
     switch (action) {
-      case 'reset':
-        global.conversationState = {
-          conversationId: `conv-${Date.now()}`,
-          startedAt: Date.now(),
-          lastUpdated: Date.now(),
-          context: {
-            messages: [],
-            edits: [],
-            projectEvolution: { majorChanges: [] },
-            userPreferences: {}
-          }
-        };
-        
-        console.log('[conversation-state] Reset conversation state');
-        
-        return NextResponse.json({
-          success: true,
-          message: 'Conversation state reset',
-          state: global.conversationState
-        });
-        
-      case 'clear-old':
-        // Clear old conversation data but keep recent context
-        if (!global.conversationState) {
-          // Initialize conversation state if it doesn't exist
-          global.conversationState = {
-            conversationId: `conv-${Date.now()}`,
-            startedAt: Date.now(),
-            lastUpdated: Date.now(),
-            context: {
-              messages: [],
-              edits: [],
-              projectEvolution: { majorChanges: [] },
-              userPreferences: {}
-            }
-          };
-          
-          console.log('[conversation-state] Initialized new conversation state for clear-old');
-          
+      case 'reset': {
+        const state = newConversation();
+        setConversation(account.id, state);
+        console.log('[conversation-state] reset');
+        return NextResponse.json({ success: true, message: 'Conversation state reset', state });
+      }
+
+      case 'clear-old': {
+        const existing = getConversation(account.id);
+        if (!existing) {
+          const state = newConversation();
+          setConversation(account.id, state);
           return NextResponse.json({
             success: true,
             message: 'New conversation state initialized',
-            state: global.conversationState
+            state,
           });
         }
-        
-        // Keep only recent data
-        global.conversationState.context.messages = global.conversationState.context.messages.slice(-5);
-        global.conversationState.context.edits = global.conversationState.context.edits.slice(-3);
-        global.conversationState.context.projectEvolution.majorChanges = 
-          global.conversationState.context.projectEvolution.majorChanges.slice(-2);
-        
-        console.log('[conversation-state] Cleared old conversation data');
-        
+
+        // Keep a short tail: enough for continuity, not enough to blow the
+        // context window on the next generation.
+        existing.context.messages = existing.context.messages.slice(-5);
+        existing.context.edits = existing.context.edits.slice(-3);
+        existing.context.projectEvolution.majorChanges =
+          existing.context.projectEvolution.majorChanges.slice(-2);
+        existing.lastUpdated = Date.now();
+        setConversation(account.id, existing);
+
         return NextResponse.json({
           success: true,
           message: 'Old conversation data cleared',
-          state: global.conversationState
+          state: existing,
         });
-        
-      case 'update':
-        if (!global.conversationState) {
-          return NextResponse.json({
-            success: false,
-            error: 'No active conversation to update'
-          }, { status: 400 });
+      }
+
+      case 'update': {
+        const existing = getConversation(account.id);
+        if (!existing) {
+          return NextResponse.json(
+            { success: false, error: 'No active conversation to update' },
+            { status: 400 },
+          );
         }
-        
-        // Update specific fields if provided
-        if (data) {
-          if (data.currentTopic) {
-            global.conversationState.context.currentTopic = data.currentTopic;
-          }
-          if (data.userPreferences) {
-            global.conversationState.context.userPreferences = {
-              ...global.conversationState.context.userPreferences,
-              ...data.userPreferences
-            };
-          }
-          
-          global.conversationState.lastUpdated = Date.now();
+
+        if (data?.currentTopic) {
+          existing.context.currentTopic = data.currentTopic;
         }
-        
+        if (data?.userPreferences) {
+          existing.context.userPreferences = {
+            ...existing.context.userPreferences,
+            ...data.userPreferences,
+          };
+        }
+        existing.lastUpdated = Date.now();
+        setConversation(account.id, existing);
+
         return NextResponse.json({
           success: true,
           message: 'Conversation state updated',
-          state: global.conversationState
+          state: existing,
         });
-        
+      }
+
       default:
-        return NextResponse.json({
-          success: false,
-          error: 'Invalid action. Use "reset" or "update"'
-        }, { status: 400 });
+        return NextResponse.json(
+          { success: false, error: 'Invalid action. Use "reset", "clear-old" or "update".' },
+          { status: 400 },
+        );
     }
   } catch (error) {
     console.error('[conversation-state] Error:', error);
-    return NextResponse.json({
-      success: false,
-      error: (error as Error).message
-    }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: (error as Error).message },
+      { status: 500 },
+    );
   }
 }
 
-// DELETE: Clear conversation state
-export async function DELETE() {
-  try {
-    global.conversationState = null;
-    
-    console.log('[conversation-state] Cleared conversation state');
-    
-    return NextResponse.json({
-      success: true,
-      message: 'Conversation state cleared'
-    });
-  } catch (error) {
-    console.error('[conversation-state] Error clearing state:', error);
-    return NextResponse.json({
-      success: false,
-      error: (error as Error).message
-    }, { status: 500 });
-  }
+/** DELETE: drop the conversation entirely. */
+export async function DELETE(request: NextRequest) {
+  const { account, error } = await accountOr401(request);
+  if (error) return error;
+
+  clearConversation(account.id);
+  return NextResponse.json({ success: true, message: 'Conversation state cleared' });
 }

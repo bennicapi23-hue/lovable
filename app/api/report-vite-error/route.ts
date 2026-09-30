@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var viteErrors: any[];
 }
 
 // Initialize global viteErrors array if it doesn't exist
-if (!global.viteErrors) {
-  global.viteErrors = [];
-}
+
 
 export async function POST(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     const { error, file, type = 'runtime-error' } = await request.json();
     
@@ -37,11 +41,11 @@ export async function POST(request: NextRequest) {
     }
     
     // Add to global errors array
-    global.viteErrors.push(errorObj);
+    session.viteErrors.push(errorObj);
     
     // Keep only last 50 errors
-    if (global.viteErrors.length > 50) {
-      global.viteErrors = global.viteErrors.slice(-50);
+    if (session.viteErrors.length > 50) {
+      session.viteErrors = session.viteErrors.slice(-50);
     }
     
     console.log('[report-vite-error] Error reported:', errorObj);

@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 declare global {
   var activeSandbox: any;
@@ -9,10 +10,15 @@ declare global {
 
 const RESTART_COOLDOWN_MS = 5000; // 5 second cooldown between restarts
 
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     // Check both v1 and v2 global references
-    const provider = global.activeSandbox || global.activeSandboxProvider;
+    const provider = session.sandbox || session.provider;
     
     if (!provider) {
       return NextResponse.json({ 
@@ -22,7 +28,7 @@ export async function POST() {
     }
     
     // Check if restart is already in progress
-    if (global.viteRestartInProgress) {
+    if (session.viteRestartInProgress) {
       console.log('[restart-vite] Vite restart already in progress, skipping...');
       return NextResponse.json({
         success: true,
@@ -32,8 +38,8 @@ export async function POST() {
     
     // Check cooldown
     const now = Date.now();
-    if (global.lastViteRestartTime && (now - global.lastViteRestartTime) < RESTART_COOLDOWN_MS) {
-      const remainingTime = Math.ceil((RESTART_COOLDOWN_MS - (now - global.lastViteRestartTime)) / 1000);
+    if (session.lastViteRestartAt && (now - session.lastViteRestartAt) < RESTART_COOLDOWN_MS) {
+      const remainingTime = Math.ceil((RESTART_COOLDOWN_MS - (now - session.lastViteRestartAt)) / 1000);
       console.log(`[restart-vite] Cooldown active, ${remainingTime}s remaining`);
       return NextResponse.json({
         success: true,
@@ -42,7 +48,7 @@ export async function POST() {
     }
     
     // Set the restart flag
-    global.viteRestartInProgress = true;
+    session.viteRestartInProgress = true;
     
     console.log('[restart-vite] Using provider method to restart Vite...');
     
@@ -81,8 +87,8 @@ export async function POST() {
     }
     
     // Update global state
-    global.lastViteRestartTime = Date.now();
-    global.viteRestartInProgress = false;
+    session.lastViteRestartAt = Date.now();
+    session.viteRestartInProgress = false;
     
     return NextResponse.json({
       success: true,
@@ -93,7 +99,7 @@ export async function POST() {
     console.error('[restart-vite] Error:', error);
     
     // Clear the restart flag on error
-    global.viteRestartInProgress = false;
+    session.viteRestartInProgress = false;
     
     return NextResponse.json({ 
       success: false, 

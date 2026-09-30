@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A new push supersedes whatever was running for the same ref: there is no
+# value in finishing a check for a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        # A real secret is not needed to compile, but the build fails without
+        # something in AUTH_SECRET, so a throwaway value stands in. It never
+        # signs anything: no server runs in this job.
+        env:
+          AUTH_SECRET: ci-placeholder-not-a-real-secret
+          DATABASE_URL: file:./ci.db
+        run: pnpm build
+
+  migrations:
+    name: Migrations apply cleanly
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations to an empty database
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: file:./ci-migrations.db
+
+      - name: Schema matches its migrations
+        # Catches the common mistake of editing lib/db/schema.ts and shipping
+        # without generating the migration: the drift only shows up in
+        # production otherwise, as a query against a column that is not there.
+        run: |
+          pnpm db:generate
+          if [ -n "$(git status --porcelain lib/db/migrations)" ]; then
+            echo "::error::schema.ts has changes with no migration. Run 'pnpm db:generate' and commit the result."
+            git status --porcelain lib/db/migrations
+            exit 1
+          fi

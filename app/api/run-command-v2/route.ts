@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SandboxProvider } from '@/lib/sandbox/types';
 import { sandboxManager } from '@/lib/sandbox/sandbox-manager';
+import { requireSession } from '@/lib/sandbox/session-context';
 
 // Get active sandbox provider from global state
 declare global {
@@ -8,6 +9,11 @@ declare global {
 }
 
 export async function POST(request: NextRequest) {
+  const lookup = await requireSession(request);
+  if (!lookup.ok) {
+    return NextResponse.json({ success: false, error: lookup.error }, { status: lookup.status });
+  }
+  const { session } = lookup;
   try {
     const { command } = await request.json();
     
@@ -19,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Get provider from sandbox manager or global state
-    const provider = sandboxManager.getActiveProvider() || global.activeSandboxProvider;
+    const provider = sandboxManager.getActiveProvider() || session.provider;
     
     if (!provider) {
       return NextResponse.json({ 
