@@ -5,7 +5,7 @@ import type { SandboxState } from '@/types/sandbox';
 import type { ConversationState } from '@/types/conversation';
 import { sandboxManager } from '@/lib/sandbox/sandbox-manager';
 import { resolveAccount } from '@/lib/billing/session';
-import { currentSession, getConversation, openSession } from '@/lib/sandbox/session-store';
+import { currentSession, getConversation } from '@/lib/sandbox/session-store';
 
 interface ParsedResponse {
   explanation: string;
@@ -263,7 +263,7 @@ export async function POST(request: NextRequest) {
   if (!account) {
     return NextResponse.json({ success: false, error: 'Sign in first.' }, { status: 401 });
   }
-  let session = currentSession(account.id);
+  const session = currentSession(account.id);
   const conversationState = getConversation(account.id);
   try {
     const { response, isEdit = false, packages = [], sandboxId } = await request.json();

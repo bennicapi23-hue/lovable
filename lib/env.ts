@@ -23,7 +23,7 @@ export interface EnvIssue {
   /** What to do about it. */
   fix: string;
   /** Which product capability this affects. */
-  feature: 'ai' | 'sandbox' | 'scraping' | 'fast-apply' | 'database' | 'auth';
+  feature: 'ai' | 'sandbox' | 'scraping' | 'fast-apply' | 'database' | 'auth' | 'billing';
 }
 
 export interface EnvReport {
@@ -38,6 +38,7 @@ export interface EnvReport {
     fastApply: boolean;
     database: boolean;
     auth: boolean;
+    billing: boolean;
   };
   sandboxProvider: SandboxProviderName;
   /** Model providers with a usable key, in preference order. */
@@ -171,12 +172,28 @@ export function inspectEnv(): EnvReport {
     });
   }
 
+  /* ----------------------------------------------------------- billing -- */
+  // Optional by design: a self-hosted install has no reason to charge anyone.
+  // A half-configured one is worse than none, though, so say so.
+  const billing = present('STRIPE_SECRET_KEY');
+  if (billing && !present('STRIPE_WEBHOOK_SECRET')) {
+    issues.push({
+      key: 'STRIPE_WEBHOOK_SECRET',
+      level: 'error',
+      feature: 'billing',
+      message:
+        'Stripe is configured but the webhook secret is not, so payments would ' +
+        'be taken and no plan would ever be granted.',
+      fix: 'Add the endpoint in the Stripe dashboard and copy its signing secret.',
+    });
+  }
+
   const ready = ai && sandbox && database && auth;
 
   return {
     ready,
     issues,
-    features: { ai, sandbox, scraping, fastApply, database, auth },
+    features: { ai, sandbox, scraping, fastApply, database, auth, billing },
     sandboxProvider,
     aiProviders,
   };
@@ -199,6 +216,7 @@ export function formatEnvReport(report: EnvReport = inspectEnv()): string {
   lines.push(`  Model providers  : ${report.aiProviders.join(', ') || 'none'}`);
   lines.push(`  Database         : ${report.features.database ? 'configured' : 'not configured'}`);
   lines.push(`  Authentication   : ${report.features.auth ? 'configured' : 'not configured'}`);
+  lines.push(`  Payments         : ${report.features.billing ? 'configured' : 'not configured'}`);
   lines.push(`  URL rebuild      : ${report.features.scraping ? 'available' : 'unavailable'}`);
   lines.push(`  Fast apply       : ${report.features.fastApply ? 'enabled' : 'disabled'}`);
 

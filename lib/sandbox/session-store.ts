@@ -10,7 +10,6 @@ import type { SandboxProvider } from './types';
  * does not exist. Our own wrapper below *is* typed: prefer `session.provider`
  * over `session.sandbox` in new code.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SandboxHandle = any;
 
 /**
