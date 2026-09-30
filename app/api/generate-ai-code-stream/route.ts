@@ -18,6 +18,8 @@ import {
   setConversation,
 } from '@/lib/sandbox/session-store';
 import { resolveUsableModel } from '@/lib/ai/provider-manager';
+import { createLogger } from '@/lib/observability/logger';
+import { formatCost, priceBuild } from '@/lib/observability/cost';
 import { recordUsage } from '@/lib/billing/entitlements';
 import { authorizeAction } from '@/lib/billing/session';
 import { rateLimit } from '@/lib/security/rate-limit';
@@ -108,8 +110,13 @@ export async function POST(request: NextRequest) {
     // configured, otherwise use one that is, rather than failing on a model
     // the operator never chose.
     const { model, substituted, requested: originallyRequested } = resolveUsableModel(requestedModel);
+    const log = createLogger('generate');
+    const startedAt = Date.now();
     if (substituted) {
-      console.log(`[generate-ai-code-stream] ${originallyRequested} is not configured; using ${model}`);
+      log.warn('requested model is not configured; substituting', {
+        requested: originallyRequested,
+        model,
+      });
     }
 
     // Generation is the expensive path: it spends model tokens and sandbox
@@ -1879,6 +1886,37 @@ Provide the complete file content without any truncation. Include all necessary 
           }
         }
         
+        // What this build consumed. Recorded even when a rate is missing, so
+        // token counts are available before anyone configures pricing.
+        const durationMs = Date.now() - startedAt;
+        try {
+          const usage = await result?.usage;
+          const cost = priceBuild({
+            model,
+            tokens: {
+              inputTokens: usage?.inputTokens ?? 0,
+              outputTokens: usage?.outputTokens ?? 0,
+              cachedInputTokens: usage?.cachedInputTokens ?? undefined,
+            },
+            sandboxSeconds: 0,
+          });
+
+          log.info('build finished', {
+            accountId: account.id,
+            model,
+            mode: isCreate ? 'create' : isEdit ? 'edit' : 'clone',
+            durationMs,
+            files: files.length,
+            inputTokens: cost.tokens.inputTokens,
+            outputTokens: cost.tokens.outputTokens,
+            modelCost: cost.modelCost,
+            costLabel: formatCost(cost.modelCost),
+          });
+        } catch (costError) {
+          // Never let accounting break a build that otherwise succeeded.
+          log.warn('could not price this build', { error: String(costError) });
+        }
+
         // Send completion with packages info
         await sendProgress({ 
           type: 'complete', 
